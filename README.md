@@ -57,4 +57,4 @@ bundles. As a result:
 
 MIT. Derived from
 [sabeechen/hassio-google-drive-backup](https://github.com/sabeechen/hassio-google-drive-backup)
-(© Stephen Beechen). See [LICENSE](ha-proton-drive-backup/LICENSE).
+(© Stephen Beechen). See [LICENSE](LICENSE).
