@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <title>Proton Drive Backup</title>
+  <link rel="icon" href="favicon.ico">
+  {#
+    Theme is driven by the add-on config. Both values are validated #RRGGBB
+    (or empty) server-side, so it is safe to inline them into the CSS variable
+    declarations below. Empty -> sensible defaults via jinja `or`.
+  #}
+  <style>
+    :root {
+      --user-bg: {{ backgroundColor or '#0b1020' }};
+      --user-accent: {{ accentColor or '#1a5fb4' }};
+    }
+  </style>
+  <link rel="stylesheet" href="static/{{ version }}/app/app.css">
+</head>
+<body>
+  <div id="app" aria-busy="true">
+    <div class="boot">
+      <div class="boot-orb" aria-hidden="true"></div>
+      <p>Loading Proton Drive Backup…</p>
+    </div>
+  </div>
+
+  {# Expose server-rendered context to the app without inline script logic. #}
+  <script id="bootstrap" type="application/json">
+    {
+      "version": "{{ version }}",
+      "coordEnabled": {{ 'true' if coordEnabled else 'false' }}
+    }
+  </script>
+  {# mock.js is a dev-only API stub (activated with ?mock=1). It is NOT served
+     in production — only the standalone devserver.py sets devMock. #}
+  {% if devMock %}<script src="static/{{ version }}/app/mock.js"></script>{% endif %}
+  <script src="static/{{ version }}/app/app.js"></script>
+</body>
+</html>

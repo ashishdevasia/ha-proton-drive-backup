@@ -1,0 +1,8 @@
+# Keep build artifacts and dev-only files out of the published image.
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+tests/
+pytest.ini
+devserver.py
+backup/static/app/mock.js
