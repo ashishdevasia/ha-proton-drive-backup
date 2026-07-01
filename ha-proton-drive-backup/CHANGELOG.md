@@ -1,3 +1,13 @@
+## v0.1.1 [2026-07-02]
+
+- Fixed getting stuck "signed out" (with backups paused) after an internet
+  outage: offline CLI errors were misread as a sign-out and never re-checked.
+  Every sync now re-probes a signed-out session, so the add-on recovers on
+  its own once connectivity returns.
+- Errors are now classified by the CLI's exact messages and error codes
+  instead of fuzzy string matching; unrecognized failures keep the last-known
+  auth state instead of guessing "signed out".
+
 ## v0.1.0 [2026-07-01]
 
 Initial release of the Proton Drive port. (Supersedes all prior 0.1.0-0.2.12

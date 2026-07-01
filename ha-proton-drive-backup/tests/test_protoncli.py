@@ -7,7 +7,8 @@ import pytest
 from backup.config import Config, Setting
 from backup.proton import ProtonCli
 from backup.proton.exceptions import (ProtonNotAuthenticated, ProtonCliMissing,
-                                      ProtonTimeout, ProtonError)
+                                      ProtonTimeout, ProtonError,
+                                      ProtonConnectionError)
 
 
 def write_script(tmp_path, body):
@@ -55,42 +56,144 @@ async def test_json_flag_is_appended_after_command(tmp_path):
     assert line.endswith("--json")
 
 
-async def test_not_authenticated_detected(tmp_path):
-    binary = write_script(tmp_path, 'echo "Failed to load session from secrets: libsecret not available" >&2\nexit 1\n')
+async def test_not_logged_in_detected(tmp_path):
+    # The CLI's pre-command login gate prints exactly this message.
+    binary = write_script(tmp_path, 'echo "You need to login first" >&2\nexit 1\n')
     cli = make_cli(tmp_path, binary)
     assert await cli.checkAuth() is False
     with pytest.raises(ProtonNotAuthenticated):
         await cli.info("/my-files")
 
 
-async def test_marker_in_successful_stdout_does_not_flip_auth(tmp_path):
-    # A successful (exit 0) command whose JSON payload happens to contain an
-    # auth-marker substring (e.g. a backup named "unauthorized.tar" or a folder
-    # called "not authenticated") must NOT be treated as a sign-out.
-    binary = write_script(tmp_path, 'echo "[{\\"name\\": \\"unauthorized.tar\\"}, {\\"name\\": \\"not-logged-in.tar\\"}]"\n')
-    cli = make_cli(tmp_path, binary)
-    cli._authenticated = True
-    entries = await cli.listFolder("/my-files/HA")
-    assert [e["name"] for e in entries] == ["unauthorized.tar", "not-logged-in.tar"]
-    assert cli.isAuthenticated() is True
-
-
-async def test_marker_only_checked_on_failure(tmp_path):
-    # Marker on stderr but exit 0 should not raise (auth errors always exit non-zero).
-    binary = write_script(tmp_path, 'echo "note: session expired warning" >&2\necho "{}"\n')
-    cli = make_cli(tmp_path, binary)
-    cli._authenticated = True
-    await cli.info("/my-files")  # must not raise
-    assert cli.isAuthenticated() is True
-
-
-async def test_checkauth_false_on_unrecognized_failure(tmp_path):
-    # A failed probe with no known auth marker should be treated as signed out,
-    # not left at a possibly-stale "authenticated" state.
-    binary = write_script(tmp_path, 'echo "token refresh failed in an unexpected way" >&2\nexit 2\n')
+async def test_session_load_failure_detected(tmp_path):
+    binary = write_script(
+        tmp_path,
+        'echo "Failed to load session from secrets (ensure you have secrets'
+        ' available, read the README for more information): libsecret error" >&2\nexit 1\n')
     cli = make_cli(tmp_path, binary)
     cli._authenticated = True
     assert await cli.checkAuth() is False
+
+
+async def test_auth_message_in_successful_stdout_does_not_flip_auth(tmp_path):
+    # An exit-0 payload containing the auth message (e.g. as a file name) must
+    # NOT be treated as a sign-out.
+    binary = write_script(tmp_path, 'echo "[{\\"name\\": \\"You need to login first.tar\\"}]"\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    entries = await cli.listFolder("/my-files/HA")
+    assert [e["name"] for e in entries] == ["You need to login first.tar"]
+    assert cli.isAuthenticated() is True
+
+
+async def test_stderr_only_classified_on_failure(tmp_path):
+    binary = write_script(tmp_path, 'echo "You need to login first" >&2\necho "{}"\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    await cli.info("/my-files")  # exit 0: must not raise
+    assert cli.isAuthenticated() is True
+
+
+async def test_checkauth_keeps_state_on_unrecognized_failure(tmp_path):
+    # Unknown failures (server errors, reworded messages) are not an auth
+    # answer; only the CLI's explicit "not logged in" flips the state.
+    binary = write_script(tmp_path, 'echo "token refresh failed in an unexpected way" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    assert await cli.checkAuth() is True
+
+
+def write_offline_script(tmp_path):
+    """Fake CLI failing exactly like the real one when offline."""
+    return write_script(tmp_path, (
+        "cat >&2 <<'EOF'\n"
+        "===============================================\n"
+        "error: Was there a typo in the url or port?\n"
+        '  path: "https://drive-api.proton.me/drive/v2/shares/my-files",\n'
+        " errno: 0,\n"
+        '  code: "FailedToOpenSocket"\n'
+        "\n"
+        "      at L_8 (src/cli/run.ts:77:13)\n"
+        "      at nr0 (src/cli/run.ts:25:9)\n"
+        "Error details:\n"
+        "{\n"
+        "  code: 'FailedToOpenSocket',\n"
+        "  path: 'https://drive-api.proton.me/drive/v2/shares/my-files',\n"
+        "  errno: 0\n"
+        "}\n"
+        "EOF\n"
+        "exit 1\n"
+    ))
+
+
+async def test_network_error_is_transient(tmp_path):
+    binary = write_offline_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonConnectionError):
+        await cli.info("/my-files")
+    # A network failure says nothing about the session; it must not sign us out.
+    assert cli.isAuthenticated() is True
+
+
+async def test_checkauth_keeps_state_when_offline(tmp_path):
+    binary = write_offline_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    assert await cli.checkAuth() is True  # transient: keep last-known state
+    cli._authenticated = False
+    assert await cli.checkAuth() is False
+
+
+async def test_bare_connection_message_is_transient(tmp_path):
+    # Bun's fixed message when a fetch can't reach the server, printed bare
+    # (observed from `auth login` while offline).
+    binary = write_script(
+        tmp_path,
+        'echo "Unable to connect. Is the computer able to access the url?" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonConnectionError):
+        await cli.info("/my-files")
+    assert cli.isAuthenticated() is True
+
+
+async def test_auth_detected_after_other_stderr_lines(tmp_path):
+    binary = write_script(
+        tmp_path,
+        'echo "some warning" >&2\necho "You need to login first" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    assert await cli.checkAuth() is False
+
+
+async def test_code_outside_details_block_is_not_network(tmp_path):
+    # code:-looking text in a plain message (which can embed user-controlled
+    # names) must not classify as a network failure.
+    binary = write_script(
+        tmp_path, 'echo "not found: code: \\"ConnectionRefused\\"" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert cli.isAuthenticated() is True
+
+
+async def test_details_code_alone_is_network(tmp_path):
+    # Covers codes whose bare message we haven't observed (e.g. ConnectionClosed).
+    binary = write_script(tmp_path, (
+        "cat >&2 <<'EOF'\n"
+        "===============================================\n"
+        "error: something went wrong\n"
+        "Error details:\n"
+        "{ code: 'ConnectionClosed' }\n"
+        "EOF\n"
+        "exit 1\n"))
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonConnectionError):
+        await cli.info("/my-files")
+    assert cli.isAuthenticated() is True
 
 
 async def test_checkauth_keeps_state_on_timeout(tmp_path):

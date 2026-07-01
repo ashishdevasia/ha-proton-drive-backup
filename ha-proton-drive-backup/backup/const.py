@@ -9,6 +9,7 @@ SOURCE_HA = "HomeAssistant"
 ERROR_PROTON_NOT_AUTHENTICATED = "proton_not_authenticated"
 ERROR_PROTON_CLI_MISSING = "proton_cli_missing"
 ERROR_PROTON_TIMEOUT = "proton_timeout"
+ERROR_PROTON_CONNECTION = "proton_cant_connect"
 ERROR_PROTON_CLI_ERROR = "proton_cli_error"
 LOG_IN_TO_PROTON = "log_in_to_proton"
 

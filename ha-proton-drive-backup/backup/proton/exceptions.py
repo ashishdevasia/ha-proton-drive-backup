@@ -1,6 +1,7 @@
 from ..exceptions import KnownError, KnownTransient
 from ..const import (ERROR_PROTON_NOT_AUTHENTICATED, ERROR_PROTON_CLI_MISSING,
-                     ERROR_PROTON_TIMEOUT, ERROR_PROTON_CLI_ERROR)
+                     ERROR_PROTON_TIMEOUT, ERROR_PROTON_CLI_ERROR,
+                     ERROR_PROTON_CONNECTION)
 
 
 class ProtonNotAuthenticated(KnownError):
@@ -44,6 +45,23 @@ class ProtonTimeout(KnownTransient):
 
     def code(self):
         return ERROR_PROTON_TIMEOUT
+
+
+class ProtonConnectionError(KnownTransient):
+    """The CLI couldn't reach Proton's servers; says nothing about the session."""
+
+    def __init__(self, detail: str = None):
+        self._detail = detail
+
+    def message(self):
+        return ("Couldn't reach Proton Drive (network problem).  The addon "
+                "will keep retrying automatically.")
+
+    def code(self):
+        return ERROR_PROTON_CONNECTION
+
+    def data(self):
+        return {"detail": self._detail} if self._detail else {}
 
 
 class ProtonError(KnownError):

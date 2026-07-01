@@ -9,7 +9,7 @@ from backup.const import SOURCE_PROTON_DRIVE
 from backup.exceptions import LogicError, UploadFailed
 from backup.proton.protonsource import ProtonSource
 from backup.proton.protoncli import PROTON_ROOT
-from backup.proton.exceptions import ProtonNotAuthenticated
+from backup.proton.exceptions import ProtonNotAuthenticated, ProtonError
 from backup.model.protonbackup import (ProtonBackup, TAR_SUFFIX, METADATA_SUFFIX,
                                        PROP_RETAINED)
 from backup.time import Time
@@ -50,6 +50,38 @@ def test_enabled_reflects_auth(tmp_path):
     src, cli = make_source(tmp_path, authed=False)
     assert src.enabled() is False
     cli._authenticated = True
+    assert src.enabled() is True
+
+
+async def test_presync_reprobes_only_when_flagged_out(tmp_path):
+    # While flagged as signed out the sync loop never consults this source, so
+    # preSync is the only chance to notice the session became usable again.
+    src, cli = make_source(tmp_path, authed=False)
+    await src.preSync()
+    assert ("checkAuth",) in cli.calls
+    # Once authenticated there's nothing to recover; don't add a probe per sync.
+    cli.calls.clear()
+    cli._authenticated = True
+    await src.preSync()
+    assert ("checkAuth",) not in cli.calls
+
+
+async def test_presync_recovers_after_outage(tmp_path):
+    # An internet outage can leave the CLI wrapper flagged as signed out even
+    # though the on-disk session is still valid.  Once connectivity is back,
+    # the pre-sync probe must re-enable the destination without user action.
+    import stat
+    from backup.proton import ProtonCli
+    script = tmp_path / "fake-proton"
+    script.write_text('#!/usr/bin/env bash\necho "{\\"name\\": \\"my-files\\"}"\n')
+    script.chmod(script.stat().st_mode | stat.S_IRWXU)
+    cfg = Config()
+    cfg.override(Setting.PROTON_CLI_PATH, str(script))
+    cfg.override(Setting.PROTON_DATA_PATH, str(tmp_path / "proton"))
+    cfg.override(Setting.PROTON_DRIVE_TIMEOUT_SECONDS, 5)
+    src, _ = make_source(tmp_path, cli=ProtonCli(cfg))
+    assert src.enabled() is False  # flagged out, e.g. by a probe during the outage
+    await src.preSync()
     assert src.enabled() is True
 
 
@@ -148,6 +180,32 @@ async def test_get_creates_folder_when_missing(tmp_path):
     src, cli = make_source(tmp_path)
     await src.get()
     assert ("createFolder", "/my-files", "HA Backups") in cli.calls
+
+
+async def test_ensure_folder_reuses_concurrently_created(tmp_path):
+    # If create fails but the folder turns out to exist (concurrent writer),
+    # reuse it instead of failing the sync.
+    src, cli = make_source(tmp_path)
+    real_create = cli.createFolder
+
+    async def race_create(parent, name):
+        await real_create(parent, name)
+        raise ProtonError("A file or folder with that name already exists", 1)
+    cli.createFolder = race_create
+
+    await src.get()  # must not raise
+    assert "/my-files/HA Backups" in cli.folders
+
+
+async def test_ensure_folder_propagates_real_create_errors(tmp_path):
+    src, cli = make_source(tmp_path)
+
+    async def failing_create(parent, name):
+        raise ProtonError("quota exceeded", 1)
+    cli.createFolder = failing_create
+
+    with pytest.raises(ProtonError):
+        await src.get()
 
 
 async def test_get_unauthenticated_raises(tmp_path):

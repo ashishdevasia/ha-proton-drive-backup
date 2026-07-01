@@ -77,6 +77,11 @@ class BackupSource(Trigger, Generic[T]):
     def maxCount(self) -> int:
         return 0
 
+    # Runs at the start of every sync, even for disabled sources, so a source
+    # that disabled itself (e.g. lost auth) can re-probe and recover.
+    async def preSync(self):
+        return
+
     def postSync(self):
         return
 
@@ -200,6 +205,8 @@ class Model():
                 raise Exception(self.simulate_error)
             else:
                 raise SimulatedError(self.simulate_error)
+        await self.source.preSync()
+        await self.dest.preSync()
         await self._syncBackups([self.source, self.dest], now)
 
         self.source.checkBeforeChanges()
