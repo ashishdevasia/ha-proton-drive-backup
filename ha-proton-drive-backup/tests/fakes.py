@@ -1,11 +1,32 @@
 """Test doubles for the Proton Drive backend."""
 import os
+import stat
 from datetime import datetime
 
 from dateutil.tz import tzutc
 
+from backup.config import Config, Setting
+from backup.proton import ProtonCli
 from backup.proton.exceptions import ProtonError, ProtonNotAuthenticated
 from backup.model.protonbackup import TAR_SUFFIX, METADATA_SUFFIX
+
+
+def write_script(tmp_path, body):
+    """Create an executable fake proton-drive that logs its args and runs body."""
+    path = tmp_path / "fake-proton"
+    script = "#!/usr/bin/env bash\n" + 'echo "$@" >> "' + str(tmp_path / "args.log") + '"\n' + body
+    path.write_text(script)
+    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
+    return str(path)
+
+
+def make_cli(tmp_path, binary):
+    cfg = Config()
+    cfg.override(Setting.PROTON_CLI_PATH, binary)
+    cfg.override(Setting.PROTON_DATA_PATH, str(tmp_path / "data"))
+    cfg.override(Setting.PROTON_DRIVE_TIMEOUT_SECONDS, 5)
+    cfg.override(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS, 5)
+    return ProtonCli(cfg)
 
 
 class FakeProtonCli:
@@ -16,6 +37,7 @@ class FakeProtonCli:
 
     def __init__(self, authenticated=True):
         self._authenticated = authenticated
+        self._auth_warning = None
         self.files = {}            # remote_path -> bytes
         self.trashed = {}          # remote_path -> bytes (moved to trash)
         self.folders = set()       # known folder paths
@@ -27,9 +49,17 @@ class FakeProtonCli:
     def isAuthenticated(self):
         return self._authenticated
 
+    def authWarning(self):
+        return self._auth_warning
+
     async def checkAuth(self):
         self.calls.append(("checkAuth",))
         return self._authenticated
+
+    async def logout(self):
+        self.calls.append(("logout",))
+        self._authenticated = False
+        self._auth_warning = None
 
     # -- filesystem -------------------------------------------------------------
     def _require_auth(self):

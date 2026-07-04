@@ -373,7 +373,7 @@
     if (!s) return "null";
     var parts = [
       state.tab, s.syncing ? 1 : 0, s.proton_authenticated ? 1 : 0, s.enable_proton_upload ? 1 : 0,
-      s.backup_cooldown_active ? 1 : 0, s.proton_login_in_progress ? 1 : 0,
+      s.backup_cooldown_active ? 1 : 0, s.proton_login_in_progress ? 1 : 0, s.proton_auth_warning ? 1 : 0,
       s.last_error ? s.last_error.error_type : "", s.last_error_count || 0,
       s.next_backup_text || "", s.last_backup_text || "", s.proton_folder || ""
     ];
@@ -538,8 +538,9 @@
       ce("div", { class: "grid cols-3" }, [
         statTile("Next backup", s.next_backup_text, s.next_backup_detail, "clock"),
         statTile("Last backup", s.last_backup_text, s.last_backup_detail, "check"),
-        statTile("Proton Drive", s.proton_authenticated ? "Connected" : "Signed out",
-          s.proton_authenticated ? ("Folder: " + (s.proton_folder || "—")) : "Sign in required", "cloud")
+        statTile("Proton Drive",
+          !s.proton_authenticated ? "Signed out" : s.proton_auth_warning ? "Connected (unverified)" : "Connected",
+          !s.proton_authenticated ? "Sign in required" : s.proton_auth_warning ? "Session couldn't be verified" : ("Folder: " + (s.proton_folder || "—")), "cloud")
       ])
     ]);
     // disable backup button if can't
@@ -632,7 +633,15 @@
   }
 
   function renderAuthBanner(host, s) {
-    if (s.proton_authenticated || !s.enable_proton_upload) return;
+    if (!s.enable_proton_upload) return;
+    if (s.proton_authenticated && s.proton_auth_warning) {
+      host.appendChild(banner("warn", "cloud", "Proton Drive session couldn't be verified",
+        "The last check failed unexpectedly. Backups will still be attempted; if they keep failing, sign in again.",
+        [{ label: "Sign in again", cls: "btn", fn: openLogin },
+         { label: "Sign out", cls: "btn ghost", fn: openProtonLogout }]));
+      return;
+    }
+    if (s.proton_authenticated) return;
     host.appendChild(banner("warn", "cloud", "Not signed in to Proton Drive",
       "Backups can be created in Home Assistant, but they won't be uploaded until you sign in to Proton Drive.",
       [{ label: "Sign in to Proton", cls: "btn", fn: openLogin }]));
@@ -666,6 +675,7 @@
   function errorTitle(e) {
     switch (e.error_type) {
       case "proton_not_authenticated": return "Proton Drive sign-in needed";
+      case "proton_cant_connect": case "proton_timeout": return "Can't reach Proton Drive";
       case "multiple_deletes": return "Confirm deleting multiple backups";
       case "low_space": case "drive_full": return "Low on space";
       default: return "Something needs your attention";
@@ -676,6 +686,8 @@
     switch (e.error_type) {
       case "proton_not_authenticated":
         out.push({ label: "Sign in to Proton", cls: "btn", fn: openLogin }); break;
+      case "proton_cant_connect": case "proton_timeout":
+        out.push({ label: "Retry now", cls: "btn", fn: doSync }); break;
       case "multiple_deletes":
         out.push({ label: "Delete them, just this once", cls: "btn", fn: function () { action(api("/confirmdelete"), "Confirmed — cleaning up"); } });
         out.push({ label: "Always allow", cls: "btn ghost", fn: function () { action(api("/confirmdelete?always=true"), "Saved — I won't ask again"); } });
@@ -1264,6 +1276,17 @@
         ce("p", { class: "dim", text: "This is a third-party application not officially supported by Proton." }),
         ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: "Sign in to Proton" })])
       ]));
+    } else {
+      host.appendChild(ce("div", { class: "card" }, [
+        ce("h2", { text: "Proton Drive account" }),
+        ce("p", { class: "dim", text: s.proton_auth_warning
+          ? "Signed in, but the session couldn't be verified on the last check. If backups keep failing, sign in again."
+          : "Signed in. Signing out keeps your backups in Proton Drive but pauses uploads until you sign in again." }),
+        ce("div", { class: "btn-row" }, [
+          s.proton_auth_warning ? ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: "Sign in again" })]) : null,
+          ce("button", { class: "btn ghost", onclick: openProtonLogout }, [iconNode("x"), ce("span", { text: "Sign out" })])
+        ])
+      ]));
     }
   }
 
@@ -1542,6 +1565,22 @@
     if (!state.pendingLogin) return;
     state.pendingLogin = false;
     api("/protonlogincancel", { method: "POST" }).catch(function () {});
+  }
+
+  function openProtonLogout() {
+    var foot = [
+      ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal }),
+      ce("button", { class: "btn danger", onclick: function () {
+        closeModal();
+        action(api("/protonlogout", { method: "POST" }), false).then(function (d) {
+          if (d && d.ok) toast(d.message || "Signed out of Proton Drive", "ok");
+          else toast((d && d.message) || "Couldn't sign out", "bad");
+        }).catch(function () {});
+      } }, [iconNode("x"), ce("span", { text: "Sign out" })])
+    ];
+    openModal(modal("Sign out of Proton Drive?", "cloud", [
+      ce("p", { text: "Your backups stay in Proton Drive, but uploads pause until you sign in again." })
+    ], foot));
   }
 
   // ------------------------------------------------------------------------

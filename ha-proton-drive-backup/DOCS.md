@@ -1,8 +1,8 @@
-# Home Assistant Add-on: Proton Drive Backup
+# Home Assistant App (Add-on): Proton Drive Backup
 
-This add-on creates Home Assistant backups on a schedule and keeps copies of
+This app creates Home Assistant backups on a schedule and keeps copies of
 them in your end-to-end encrypted Proton Drive. It is a port of the
-[Google Drive Backup add-on](https://github.com/sabeechen/hassio-google-drive-backup);
+[Google Drive Backup app](https://github.com/sabeechen/hassio-google-drive-backup);
 the scheduling, retention, and Home Assistant integration are unchanged.
 
 > **This is a third-party application not officially supported by Proton.** It is
@@ -10,7 +10,7 @@ the scheduling, retention, and Home Assistant integration are unchanged.
 
 ## Getting started
 
-1. Install and start the add-on.
+1. Install and start the app.
 2. Open the Web UI and click **Sign in**. Open the Proton link it shows in any
    browser and complete sign-in (including 2-factor). The UI flips to **Signed
    in** automatically. See [AUTHENTICATION.md](AUTHENTICATION.md).
@@ -28,12 +28,12 @@ Once signed in, backups sync automatically.
 - `backup_time_of_day`: `HH:MM` time of day to create backups.
 - `delete_after_upload`: delete a backup from Home Assistant once it reaches Proton Drive.
 - `delete_before_new_backup`: purge old backups before creating a new one.
-- `ignore_other_backups` / `ignore_upgrade_backups`: ignore backups not created by this add-on.
+- `ignore_other_backups` / `ignore_upgrade_backups`: ignore backups not created by this app.
 
 ### Proton Drive options
 
 - `enable_proton_upload` (default `true`): upload backups to Proton Drive. When
-  `false`, the add-on only manages backups inside Home Assistant.
+  `false`, the app only manages backups inside Home Assistant.
 - `proton_folder_name` (default `Home Assistant Backups`): the folder created
   under Proton Drive's `/my-files` root.
 - `proton_cli_path` (default `/usr/bin/proton-drive`): path to the bundled CLI.
@@ -62,7 +62,7 @@ Each backup becomes two files in the Proton Drive folder:
 - `<slug>.tar` — the backup archive.
 - `<slug>.metadata.json` — a small sidecar describing the backup (name, date,
   type, version, protected/retained flags, note). Proton Drive has no
-  file-property API, so this sidecar is how the add-on tracks backups.
+  file-property API, so this sidecar is how the app tracks backups.
 
 The Proton Drive CLI cannot stream, so each upload and download is staged
 through a temporary file under `proton_data_path` (default `/data/proton/tmp`).
@@ -74,8 +74,8 @@ keeps. The temporary file is removed as soon as the transfer finishes.
 
 To stay signed in across restarts, the `proton-drive` CLI keeps its session in a
 keyring under `proton_data_path` (default `/data/proton`). Home Assistant
-includes every add-on's `/data` in a **full backup**, so the Proton session is
-captured inside the backup archives this add-on creates — including the copies
+includes every app's `/data` in a **full backup**, so the Proton session is
+captured inside the backup archives this app creates — including the copies
 it uploads to Proton Drive.
 
 The copy stored in Proton Drive is end-to-end encrypted by Proton, so Proton (or
@@ -95,13 +95,13 @@ session that can access your Proton Drive.
 
 ## When the Proton session expires, backups pause
 
-While `enable_proton_upload` is on (the default) and the add-on is **not** signed
-in to Proton, the destination counts as "not configured" and the add-on creates
+While `enable_proton_upload` is on (the default) and the app is **not** signed
+in to Proton, the destination counts as "not configured" and the app creates
 **no new backups at all** — not even local Home Assistant ones. The session
 normally survives restarts and upgrades, but it can lapse (you sign out, or
 Proton invalidates it).
 
-To warn you, the add-on (with `notify_for_stale_backups` on, the default) raises
+To warn you, the app (with `notify_for_stale_backups` on, the default) raises
 a **prompt, dedicated notification** as soon as it detects this paused state —
 "Proton Drive Backup is paused — sign in needed" — with a link to re-sign in. It
 clears automatically once you're signed back in. The stale-backup sensor and
@@ -113,11 +113,11 @@ being caught out:
 2. Re-sign in from the Web UI's **Sign in** button when alerted (the paused
    notification links straight to it).
 3. If you'd rather local backups keep running independently of Proton, either set
-   `enable_proton_upload: false` (the add-on then manages Home Assistant backups
+   `enable_proton_upload: false` (the app then manages Home Assistant backups
    only), or keep a separate Home Assistant scheduled-backup automation as a
    safety net.
 
-## Limitations vs. the Google Drive add-on
+## Limitations vs. the Google Drive app
 
 - Authentication is interactive (a browser-based Proton sign-in) rather than
   OAuth. You start it from the Web UI's **Sign in** button.

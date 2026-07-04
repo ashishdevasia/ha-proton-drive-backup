@@ -26,7 +26,7 @@ from backup.worker import Trigger
 from backup.logger import getLogger, getHistory, TraceLogger
 from backup.debugworker import DebugWorker
 from backup.proton import ProtonSource, ProtonCli
-from backup.proton.exceptions import ProtonNotAuthenticated
+from backup.proton.exceptions import ProtonNotAuthenticated, ProtonConnectionError
 from .debug import Debug
 
 logger = getLogger(__name__)
@@ -129,6 +129,7 @@ class UiServer(Trigger, Startable):
         status['sources'] = self._coord.buildBackupMetrics()
         status['enable_proton_upload'] = self.config.get(Setting.ENABLE_PROTON_UPLOAD)
         status['proton_authenticated'] = self._cli.isAuthenticated()
+        status['proton_auth_warning'] = self._cli.authWarning()
         status['proton_login_in_progress'] = self._cli.loginInProgress()
         status['proton_login_url'] = self._cli.loginUrl()
         status['proton_login_error'] = self._cli.loginError()
@@ -230,6 +231,21 @@ class UiServer(Trigger, Startable):
     async def protonlogincancel(self, request: Request):
         await self._cli.cancelLogin()
         return web.json_response({'ok': True})
+
+    async def protonlogout(self, request: Request):
+        """Sign out of Proton Drive."""
+        try:
+            await self._proton.signOut()
+        except ProtonConnectionError:
+            return web.json_response({
+                'ok': False,
+                'message': "Couldn't sign out: Proton Drive is unreachable "
+                           "(network problem). Try again once you're back online.",
+            })
+        except KnownError as e:
+            return web.json_response({'ok': False, 'message': e.message()})
+        self._coord.trigger()
+        return web.json_response({'ok': True, 'message': "Signed out of Proton Drive."})
 
     # --- Backup operations -----------------------------------------------------
 
@@ -535,7 +551,7 @@ class UiServer(Trigger, Startable):
         app.add_routes([web.get('/favicon.ico', self.favicon)])
         app.add_routes([web.get('/logo/{slug}', self.addonLogo)])
         handlers = [self.getstatus, self.protonauth, self.protonlogin, self.protonlogincancel,
-                    self.backup, self.log,
+                    self.protonlogout, self.backup, self.log,
                     self.sync, self.startSync, self.cancelSync,
                     self.getconfig, self.exposeserver, self.saveconfig,
                     self.confirmdelete, self.skipspacecheck, self.ignorestartupcooldown,
