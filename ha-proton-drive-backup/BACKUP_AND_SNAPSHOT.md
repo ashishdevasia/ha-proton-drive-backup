@@ -35,12 +35,12 @@ backed_up
 ```
 #### Example Attributes:
 ```yaml
-friendly_name: Snapshots State
+friendly_name: Snapshot State
 last_snapshot: 2021-09-01T20:26:49.100376+00:00
-snapshots_in_google_drive: 2
+snapshots_in_proton_drive: 2
 snapshots_in_hassio: 2
 snapshots_in_home_assistant: 2
-size_in_google_drive: 2.5 GB
+size_in_proton_drive: 2.5 GB
 size_in_home_assistant: 2.5 GB
 snapshots:
 - name: Full Snapshot 2021-02-06 11:37:00
@@ -85,10 +85,10 @@ backed_up
 ```yaml
 friendly_name: Backup State
 last_backup: 2021-09-01T20:26:49.100376+00:00
-last_upload: 2021-09-01T20:26:49.100376+00:00
-backups_in_google_drive: 2
+last_uploaded: 2021-09-01T20:26:49.100376+00:00
+backups_in_proton_drive: 2
 backups_in_home_assistant: 2
-size_in_google_drive: 2.5 GB
+size_in_proton_drive: 2.5 GB
 size_in_home_assistant: 2.5 GB
 backups:
 - name: Full Snapshot 2021-02-06 11:37:00
@@ -105,19 +105,19 @@ backups:
 ```binary_sensor.backups_stale``` is "on" when backups are stale and "off"" otherwise.  Backups are stale when the app is 6 hours past a scheduled backup and no new backup has been made.  This delay is in place to avoid triggerring on transient errors (eg internet connectivity problems or one-off problems in Home Assistant).
 
 ```sensor.backup_state``` is:
-- ```waiting``` when the app is first booted up or hasn't been connected to Google Drive yet.
+- ```waiting``` when the app is first booted up or hasn't been connected to Proton Drive yet.
 - ```error``` immediately after any error is encountered, even transient ones.
 - ```backed_up``` when everything is running fine without errors.
 
 It's attributes are:
-- ```last_backup``` The UTC ISO-8601 date of the most recent backup in Home Assistant or Google Drive.
--  ```last_upload``` The UTC ISO-8601 date of the most recent backup uploaded to Google Drive.
--  ```backups_in_google_drive``` The number of backups in Google Drive.
+- ```last_backup``` The UTC ISO-8601 date of the most recent backup in Home Assistant or Proton Drive.
+-  ```last_uploaded``` The UTC ISO-8601 date of the most recent backup uploaded to Proton Drive.
+-  ```backups_in_proton_drive``` The number of backups in Proton Drive.
 -  ```backups_in_home_assistant``` The number of backups in Home Assistant.
--  ```size_in_google_drive``` A string representation of the space used by backups in Google Drive.
+-  ```size_in_proton_drive``` A string representation of the space used by backups in Proton Drive.
 -  ```size_in_home_assistant``` A string representation of the space used by backups in Home Assistant.
 -  ```backups``` The list of each snapshot in decending order of date.  Each snapshot includes its ```name```, ```date```, ```slug```, and ```state```.  ```state``` can be one of:
-    - ```Backed Up``` if its in Home Assistant and Google Drive.
+    - ```Backed Up``` if its in Home Assistant and Proton Drive.
     - ```HA Only``` if its only in Home Assistant.
-    - ```Drive Only``` if its only in Google Drive.
+    - ```Proton Drive Only``` if its only in Proton Drive.
     - ```Pending``` if the snapshot was requested but not yet complete.
