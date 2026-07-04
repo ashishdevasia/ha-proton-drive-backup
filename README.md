@@ -1,12 +1,12 @@
 # Home Assistant Proton Drive Backup
 
-A Home Assistant add-on repository that automatically creates Home Assistant
+A Home Assistant app (add-on) repository that automatically creates Home Assistant
 backups and keeps copies of them in your end-to-end encrypted
 [Proton Drive](https://proton.me/drive).
 
 It is a Proton Drive port of the excellent
 [Home Assistant Google Drive Backup](https://github.com/sabeechen/hassio-google-drive-backup)
-add-on by Stephen Beechen (MIT licensed). The scheduling, retention,
+app by Stephen Beechen (MIT licensed). The scheduling, retention,
 generational backup, and Home Assistant integration logic is reused unchanged;
 only the storage backend has been replaced.
 
@@ -17,7 +17,8 @@ only the storage backend has been replaced.
 
 ## Installation
 
-1. In Home Assistant, go to **Settings → Add-ons → Add-on Store**.
+1. In Home Assistant, go to **Settings → Apps → App Store** (called
+   **Settings → Add-ons → Add-on Store** on older Home Assistant versions).
 2. Open the **⋮** menu (top right) → **Repositories**, and add:
 
    ```
@@ -31,21 +32,21 @@ only the storage backend has been replaced.
 
 ## Documentation
 
-The add-on and its full documentation live in
+The app and its full documentation live in
 [`ha-proton-drive-backup/`](ha-proton-drive-backup/):
 
-- [Add-on overview](ha-proton-drive-backup/README.md)
+- [App overview](ha-proton-drive-backup/README.md)
 - [Configuration / options](ha-proton-drive-backup/DOCS.md)
 - [Authentication](ha-proton-drive-backup/AUTHENTICATION.md)
 - [Backups & snapshots](ha-proton-drive-backup/BACKUP_AND_SNAPSHOT.md)
 - [Generational backups](ha-proton-drive-backup/GENERATIONAL_BACKUP.md)
 - [Changelog](ha-proton-drive-backup/CHANGELOG.md)
 
-## How it differs from the Google Drive add-on
+## How it differs from the Google Drive app
 
 Proton Drive has **no public API** — it is end-to-end encrypted and the only
 supported integration is the official
-[`proton-drive` CLI](https://proton.me/support/drive-cli), which the add-on
+[`proton-drive` CLI](https://proton.me/support/drive-cli), which the app
 bundles. As a result:
 
 - Authentication is an interactive browser sign-in (with 2FA), not OAuth.

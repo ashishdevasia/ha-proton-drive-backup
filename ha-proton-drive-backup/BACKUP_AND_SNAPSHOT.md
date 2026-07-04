@@ -1,12 +1,12 @@
 # 'Snapshot' vs 'Backup'
-In August 2021 [the Home Assistant team announced](https://www.home-assistant.io/blog/2021/08/24/supervisor-update/) that 'snapshots' will be called 'backups' moving forward.  This addon exposes a binary sensor to indicate if snapshots are stale and a another sensor that publishes details about backups.  Both of the sensors used 'snapshot' in their names and values, so they had to be changed to match the new language.  To prevent breaking any existing automations you might have, the addon will only start using the new names and values when you upgrade if you tell it to.  
+In August 2021 [the Home Assistant team announced](https://www.home-assistant.io/blog/2021/08/24/supervisor-update/) that 'snapshots' will be called 'backups' moving forward.  This app (add-on) exposes a binary sensor to indicate if snapshots are stale and a another sensor that publishes details about backups.  Both of the sensors used 'snapshot' in their names and values, so they had to be changed to match the new language.  To prevent breaking any existing automations you might have, the app will only start using the new names and values when you upgrade if you tell it to.  
 
-This can be controlled by using the configuration option ```call_backup_snapshot```, which will use the old names and values for sensors when it is true.  If you updated the addon from a version that used to use 'snapshot' in it names, this option will be automatically added when you update to make sure it doesn't break any existing automations.
+This can be controlled by using the configuration option ```call_backup_snapshot```, which will use the old names and values for sensors when it is true.  If you updated the app from a version that used to use 'snapshot' in it names, this option will be automatically added when you update to make sure it doesn't break any existing automations.
 
 Here is a breakdown of what the new and old sensor values mean:
 
 ## Old sensor name/values
-These will be the sensor values used when ```call_backup_snapshot: True``` or if the addon is below version 0.105.1.  The addon sets ```call_backup_snapshot: True``` automatically if you upgrade the addon from an older version.
+These will be the sensor values used when ```call_backup_snapshot: True``` or if the app is below version 0.105.1.  The app sets ```call_backup_snapshot: True``` automatically if you upgrade the app from an older version.
 ### Backup Stale Binary Sensor
 #### Entity Id: 
 ```yaml
@@ -54,7 +54,7 @@ snapshots:
 ```
 
 ## New Sensor Names/Values
-These will be the sensor values used when ```call_backup_snapshot: False``` or if the configuration option is un-set.  New installations of the addon will default to this.
+These will be the sensor values used when ```call_backup_snapshot: False``` or if the configuration option is un-set.  New installations of the app will default to this.
 ### Backup Stale Binary Sensor
 #### Entity Id
 ```yaml
@@ -102,10 +102,10 @@ backups:
 ```
 
 ### What do the values mean?
-```binary_sensor.backups_stale``` is "on" when backups are stale and "off"" otherwise.  Backups are stale when the addon is 6 hours past a scheduled backup and no new backup has been made.  This delay is in place to avoid triggerring on transient errors (eg internet connectivity problems or one-off problems in Home Assistant).
+```binary_sensor.backups_stale``` is "on" when backups are stale and "off"" otherwise.  Backups are stale when the app is 6 hours past a scheduled backup and no new backup has been made.  This delay is in place to avoid triggerring on transient errors (eg internet connectivity problems or one-off problems in Home Assistant).
 
 ```sensor.backup_state``` is:
-- ```waiting``` when the addon is first booted up or hasn't been connected to Google Drive yet.
+- ```waiting``` when the app is first booted up or hasn't been connected to Google Drive yet.
 - ```error``` immediately after any error is encountered, even transient ones.
 - ```backed_up``` when everything is running fine without errors.
 

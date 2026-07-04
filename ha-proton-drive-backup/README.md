@@ -1,11 +1,11 @@
-# Home Assistant Add-on: Proton Drive Backup
+# Home Assistant App (Add-on): Proton Drive Backup
 
 Automatically create Home Assistant backups and keep copies of them in your
 end-to-end encrypted [Proton Drive](https://proton.me/drive).
 
-This add-on is a Proton Drive port of the excellent
+This app (add-on) is a Proton Drive port of the excellent
 [Home Assistant Google Drive Backup](https://github.com/sabeechen/hassio-google-drive-backup)
-add-on by Stephen Beechen (MIT licensed). All of the scheduling, retention,
+app by Stephen Beechen (MIT licensed). All of the scheduling, retention,
 generational backup, and Home Assistant integration logic is reused; only the
 storage backend has been replaced.
 
@@ -14,14 +14,14 @@ storage backend has been replaced.
 > Proton AG. "Proton" and "Proton Drive" are trademarks of Proton AG, used here
 > only to describe interoperability.
 
-## How it differs from the Google Drive add-on
+## How it differs from the Google Drive app
 
 Proton Drive has **no public API** — it is end-to-end encrypted and the only
 supported integration is the official
 [`proton-drive` CLI](https://proton.me/support/drive-cli). That leads to a few
-deliberate differences from the original add-on:
+deliberate differences from the original app:
 
-| | Google Drive add-on | This add-on |
+| | Google Drive app | This app |
 |---|---|---|
 | Backend | Google Drive REST API | `proton-drive` CLI (bundled in the image) |
 | Auth | OAuth via a hosted server | interactive browser sign-in from the Web UI |
@@ -33,7 +33,7 @@ staged through a temp file under `/data/proton/tmp`.
 
 ## Installation
 
-1. Add this repository to the Home Assistant add-on store.
+1. Add this repository to the Home Assistant app store (add-on store).
 2. Install **Home Assistant Proton Drive Backup** and start it.
 3. Open the Web UI. It will report that Proton Drive is **Not signed in**.
 
@@ -43,7 +43,7 @@ Sign-in is interactive (browser based) and only has to be done once — the
 session is stored in a keyring under `/data` and survives restarts and upgrades.
 2-factor authentication is fully supported (it happens on Proton's web login).
 
-1. Open the add-on's Web UI and click **Sign in**.
+1. Open the app's Web UI and click **Sign in**.
 2. Open the Proton sign-in link it shows (on any device) and complete sign-in,
    including 2FA if enabled.
 3. Leave the Web UI open — it flips to **Signed in** automatically and starts
@@ -54,7 +54,7 @@ secret service works.
 
 ## Configuration
 
-The options mirror the original add-on. The Proton-specific ones are:
+The options mirror the original app. The Proton-specific ones are:
 
 | Option | Default | Description |
 |---|---|---|
