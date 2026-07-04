@@ -19,23 +19,16 @@ logger = getLogger(__name__)
 # The Proton Drive CLI exposes the user's drive under this virtual root.
 PROTON_ROOT = "/my-files"
 
-# The CLI's error contract (from the source embedded in the binary, verified
-# live): expected errors print exactly their message to stderr; unexpected
-# errors print a banner, stack trace, and an "Error details:" field dump.
-# Everything exits 1, so stderr is the only machine-readable channel.
 NOT_LOGGED_IN = "You need to login first"
 SESSION_LOAD_FAILED = "Failed to load session from secrets"
 
-# Bun (the CLI's runtime) can't-reach-the-server failures: codes from the
-# "Error details:" dump, and its fixed messages for when printed bare.
 NETWORK_ERROR_CODES = {"FailedToOpenSocket", "ConnectionRefused", "ConnectionClosed"}
 NETWORK_ERROR_MESSAGES = (
     "Was there a typo in the url or port?",
     "Unable to connect. Is the computer able to access the url?",
 )
 ERROR_DETAILS_HEADER = "Error details:"
-# Anchored to a line start (allowing an inlined "{") so a code: inside a
-# quoted string value can't match.
+
 ERROR_DETAILS_CODE = re.compile(r'^[\s{]*code:\s*[\'"]([A-Za-z]\w*)[\'"]', re.MULTILINE)
 
 # The CLI prints the interactive sign-in link on its own line during `auth login`.
