@@ -3,9 +3,9 @@
    Lets every UI state be previewed without a running Home Assistant /
    Supervisor. Provides window.MockServer used by app.js's api() layer.
 
-   Scenarios: normal, syncing, uploading, signed-out, login-pending,
-   error-auth, error-multiple-deletes, error-low-space, please-wait,
-   cooldown, empty, many.
+   Scenarios: normal, syncing, uploading, signed-out, auth-warning,
+   login-pending, error-auth, error-offline, error-multiple-deletes,
+   error-low-space, please-wait, cooldown, empty, many.
    ========================================================================= */
 (function () {
   "use strict";
@@ -68,7 +68,7 @@
       syncing: false, ignore_sync_error: false, firstSync: false,
       backup_name_template: "Full Backup {year}-{month}-{day} {hr24}:{min}:{sec}",
       sources: sources(3, 2),
-      enable_proton_upload: true, proton_authenticated: true,
+      enable_proton_upload: true, proton_authenticated: true, proton_auth_warning: null,
       proton_login_in_progress: false, proton_login_url: null, proton_login_error: null,
       proton_folder: "Home Assistant Backups", backup_cooldown_active: false,
       backup_name_keys: { year: "2026", month: "06", day: "28", hr24: "02", min: "51", sec: "38", version: "2026.6.0", date: "2026-06-28" }
@@ -125,6 +125,9 @@
       case "signed-out":
         s.proton_authenticated = false;
         break;
+      case "auth-warning":
+        s.proton_auth_warning = "proton-drive exited 1: unexpected server error";
+        break;
       case "login-pending":
         s.proton_authenticated = false; s.proton_login_in_progress = true;
         s.proton_login_url = "https://account.proton.me/authorize?client=web#payload=MOCK_SECRET_DO_NOT_LOG";
@@ -132,6 +135,10 @@
       case "error-auth":
         s.last_error = { error_type: "proton_not_authenticated", message: "The addon isn't signed in to Proton Drive. Open the addon's Web UI and click Sign in to authorize with Proton Drive.", details: "ProtonNotAuthenticated: session expired\n  at protoncli.py:120", data: {} };
         s.last_error_count = 3; s.proton_authenticated = false;
+        break;
+      case "error-offline":
+        s.last_error = { error_type: "proton_cant_connect", message: "Couldn't reach Proton Drive (network problem).  The addon will keep retrying automatically.", details: "ProtonConnectionError: FailedToOpenSocket", data: {} };
+        s.last_error_count = 2;
         break;
       case "error-multiple-deletes":
         s.last_error = { error_type: "multiple_deletes", message: "The add-on has been configured to delete more than one older backups. Please confirm this.", details: "DeleteMultipleBackups", data: { count: 3 } };
@@ -156,7 +163,7 @@
   function reject(data) { return Promise.reject(data); }
 
   var SCENARIOS = ["normal", "many", "empty", "syncing", "uploading", "uploading-cli", "pending", "signed-out",
-    "login-pending", "cooldown", "error-auth", "error-multiple-deletes", "error-low-space", "please-wait"];
+    "auth-warning", "login-pending", "cooldown", "error-auth", "error-offline", "error-multiple-deletes", "error-low-space", "please-wait"];
 
   window.MockServer = {
     scenarios: function () { return SCENARIOS; },
@@ -217,6 +224,7 @@
         case "/protonlogin": return ok({ ok: true, url: "https://account.proton.me/authorize?client=web#payload=MOCK_SECRET_DO_NOT_LOG", message: "Open this link and sign in (mock)." });
         case "/protonlogincancel": scenario = "signed-out"; return ok({ ok: true });
         case "/protonauth": return ok({ authenticated: status().proton_authenticated, message: "Checked (mock)" });
+        case "/protonlogout": scenario = "signed-out"; return ok({ ok: true, message: "Signed out (mock)" });
         case "/confirmdelete": scenario = "normal"; return ok({ message: "Confirmed (mock)" });
         case "/skipspacecheck": scenario = "normal"; return ok({ message: "Skipping space check (mock)" });
         case "/ignorestartupcooldown": scenario = "normal"; return ok({ message: "Cooldown skipped (mock)" });

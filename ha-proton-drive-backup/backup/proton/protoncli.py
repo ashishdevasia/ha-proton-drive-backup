@@ -11,30 +11,42 @@ from ..config import Config, Setting
 from ..exceptions import LogicError
 from ..logger import getLogger
 from .exceptions import (ProtonError, ProtonNotAuthenticated,
-                         ProtonCliMissing, ProtonTimeout)
+                         ProtonCliMissing, ProtonTimeout,
+                         ProtonConnectionError)
 
 logger = getLogger(__name__)
 
 # The Proton Drive CLI exposes the user's drive under this virtual root.
 PROTON_ROOT = "/my-files"
 
-# Substrings the CLI prints (to stderr, exit 0/non-zero) when no usable session
-# can be loaded.  Used to translate raw CLI failures into a typed exception so
-# the rest of the addon can react the same way it did to expired Google creds.
-# Full phrases the CLI emits to stderr when there's no usable session.  Kept
-# specific so a non-auth error that merely contains a word like "unauthorized"
-# (e.g. a per-file permission message) isn't misread as a sign-out.
-NOT_AUTHED_MARKERS = [
-    "failed to load session",
-    "libsecret not available",
-    "no active session",
-    "not logged in",
-    "need to login",
-    "session expired",
-]
+NOT_LOGGED_IN = "You need to login first"
+SESSION_LOAD_FAILED = "Failed to load session from secrets"
+
+NETWORK_ERROR_CODES = {"FailedToOpenSocket", "ConnectionRefused", "ConnectionClosed"}
+NETWORK_ERROR_MESSAGES = (
+    "Was there a typo in the url or port?",
+    "Unable to connect. Is the computer able to access the url?",
+)
+ERROR_DETAILS_HEADER = "Error details:"
+
+ERROR_DETAILS_CODE = re.compile(r'^[\s{]*code:\s*[\'"]([A-Za-z]\w*)[\'"]', re.MULTILINE)
 
 # The CLI prints the interactive sign-in link on its own line during `auth login`.
 LOGIN_URL_RE = re.compile(r"https://\S*proton\.me/\S+", re.IGNORECASE)
+
+
+def _classify_failure(stderr: str):
+    """Map a failed command's stderr to a typed exception class, or None."""
+    lines = [line.strip() for line in stderr.splitlines()]
+    if any(line == NOT_LOGGED_IN or line.startswith(SESSION_LOAD_FAILED) for line in lines):
+        return ProtonNotAuthenticated
+    details = stderr.partition(ERROR_DETAILS_HEADER)[2]
+    if set(ERROR_DETAILS_CODE.findall(details)) & NETWORK_ERROR_CODES:
+        return ProtonConnectionError
+    # Whole lines only: free text can embed user-controlled names.
+    if any(line.removeprefix("error: ") in NETWORK_ERROR_MESSAGES for line in lines):
+        return ProtonConnectionError
+    return None
 
 
 @singleton
@@ -52,6 +64,8 @@ class ProtonCli:
         self.config = config
         self._auth_checked = False
         self._authenticated = False
+        # Set when a probe fails unclassified while signed in ("can't verify").
+        self._auth_warning: Optional[str] = None
         # Every `proton-drive` invocation shares one on-disk session/keyring/cache
         # under PROTON_DATA_PATH.  The CLI isn't documented as safe to run
         # concurrently against the same session, so serialize all invocations
@@ -131,15 +145,17 @@ class ProtonCli:
         if result.returncode != 0 and stderr.strip():
             logger.debug("proton-drive: '%s' stderr: %s", cmd_str, stderr.strip()[:500])
 
-        # Only treat a *failed* command as possibly-unauthenticated, and only scan
-        # stderr.  The CLI prints auth failures to stderr with a non-zero exit;
-        # stdout carries the JSON payload (file names, the configured folder name,
-        # notes) which is user-controlled and must never be matched against.
+        # Classify only failed commands, and only from stderr: stdout carries
+        # the JSON payload (user-controlled names) and must never be matched.
         if result.returncode != 0:
-            stderr_l = stderr.lower()
-            if any(marker.lower() in stderr_l for marker in NOT_AUTHED_MARKERS):
+            error_type = _classify_failure(stderr)
+            if error_type is ProtonNotAuthenticated:
                 self._authenticated = False
+                self._auth_warning = None
                 raise ProtonNotAuthenticated(result.message())
+            # check=False callers are best-effort; don't fail them on a blip.
+            if check and error_type is ProtonConnectionError:
+                raise ProtonConnectionError(result.message())
 
         if check and result.returncode != 0:
             raise ProtonError(result.message(), result.returncode)
@@ -178,51 +194,41 @@ class ProtonCli:
 
     async def checkAuth(self) -> bool:
         """
-        Return True if the CLI currently has a usable session.
-
-        A definite "not authenticated" result flips the cached state to False;
-        a transient/unexpected error (network, parse, libsecret hiccup) leaves
-        the previously-known state untouched and is logged, so a blip doesn't
-        masquerade as a sign-out.  ProtonCliMissing still propagates because it
-        is a hard, non-retryable misconfiguration.
-
-        This probe is redundant safety: if another CLI command is already
-        running (e.g. a long upload holds the lock), don't queue behind it — a
-        command in flight means the session is in use, so just report the
-        last-known state instead of blocking the caller (e.g. the Web UI).
+        Probe for a usable session.  Only the CLI's explicit "not logged in"
+        flips the state to False; other failures keep the last-known state.
+        ProtonCliMissing propagates (hard misconfiguration).
         """
-        if self._cli_lock.locked():
+        if self._cli_lock.locked() or self.loginInProgress():
+            # A command or interactive login is using the session; don't race it.
             logger.debug("Skipping Proton auth probe; a proton-drive command is already running")
             self._auth_checked = True
             return self._authenticated
         try:
             result = await self._run_json(["filesystem", "info", PROTON_ROOT])
-            # Require an actual payload: a usable session returns the root node
-            # object.  An exit-0 with empty output must not be read as signed in.
+            # Exit-0 with no payload is not proof of a session.
             self._authenticated = bool(result)
+            self._auth_warning = None
         except ProtonNotAuthenticated:
             self._authenticated = False
+            self._auth_warning = None
         except ProtonCliMissing:
             raise
-        except ProtonTimeout as e:
-            # A timeout is transient (offline/slow), not a sign-out: keep the
-            # last-known state so a blip doesn't toggle the UI to "not signed in".
-            logger.warning("Timed out verifying Proton Drive authentication: " + str(e))
-        except ProtonError as e:
-            # The probe ran but failed for a reason we don't have a specific auth
-            # marker for (e.g. the CLI reworded an expiry message, a refresh
-            # failure, can't access the root).  Treat the session as unusable
-            # rather than leaving a possibly-stale "authenticated" state.
-            logger.warning("Proton Drive doesn't look usable, treating as signed out: " + str(e))
-            self._authenticated = False
+        except (ProtonTimeout, ProtonConnectionError) as e:
+            logger.warning("Couldn't reach Proton Drive to verify authentication: " + str(e))
         except Exception as e:
             logger.warning("Couldn't verify Proton Drive authentication: " + str(e))
+            # Not an auth answer, but the session may be dead: warn, don't guess.
+            if self._authenticated:
+                self._auth_warning = str(e)
         finally:
             self._auth_checked = True
         return self._authenticated
 
     def isAuthenticated(self) -> bool:
         return self._authenticated
+
+    def authWarning(self) -> Optional[str]:
+        return self._auth_warning
 
     # --- Interactive (browser) login, driven from the Web UI -------------------
 
@@ -280,6 +286,7 @@ class ProtonCli:
     async def _readLoginUrl(self, proc, timeout: float) -> str:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        seen = []
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -290,10 +297,15 @@ class ProtonCli:
                 raise ProtonError("Timed out waiting for the Proton sign-in link")
             if not line:
                 rc = await proc.wait()
+                output = "\n".join(seen)
+                if _classify_failure(output) is ProtonConnectionError:
+                    raise ProtonConnectionError(output[-500:])
                 raise ProtonError(
                     "The sign-in process exited before showing a link (exit {}). "
                     "Is the keyring/secret service available?".format(rc))
-            m = LOGIN_URL_RE.search(line.decode("utf-8", errors="replace"))
+            text = line.decode("utf-8", errors="replace")
+            seen.append(text.strip())
+            m = LOGIN_URL_RE.search(text)
             if m:
                 # Trim trailing punctuation the CLI might place after the link.
                 return m.group(0).strip().rstrip(').,;\'"')
@@ -308,6 +320,7 @@ class ProtonCli:
                 return
             if proc.returncode == 0:
                 self._authenticated = True
+                self._auth_warning = None
                 logger.info("Signed in to Proton Drive")
             else:
                 self._login_error = "Sign-in didn't complete (exit {}).".format(proc.returncode)
@@ -366,8 +379,17 @@ class ProtonCli:
             pass
 
     async def logout(self) -> None:
-        await self._run(["auth", "logout"], check=False)
+        if self._cli_lock.locked():
+            # Don't queue behind a long transfer (up to the transfer timeout).
+            raise ProtonError("Another Proton Drive operation is in progress. "
+                              "Try signing out again in a moment.")
+        result = await self._run(["auth", "logout"], check=False)
+        if result.returncode != 0 and _classify_failure(result.stderr) is ProtonConnectionError:
+            # v0.4.6 logout is local-only (can't fail on network); guard future
+            # versions — a fake sign-out would be undone by the next probe.
+            raise ProtonConnectionError(result.message())
         self._authenticated = False
+        self._auth_warning = None
 
     async def listFolder(self, path: str) -> List[Dict[str, Any]]:
         data = await self._run_json(["filesystem", "list", path])
