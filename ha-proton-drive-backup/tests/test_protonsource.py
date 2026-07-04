@@ -14,7 +14,8 @@ from backup.model.protonbackup import (ProtonBackup, TAR_SUFFIX, METADATA_SUFFIX
                                        PROP_RETAINED)
 from backup.time import Time
 
-from tests.fakes import FakeProtonCli, FakeInfo, FakeSource, FakeBackup
+from tests.fakes import (FakeProtonCli, FakeInfo, FakeSource, FakeBackup,
+                         write_script, make_cli)
 
 
 def make_source(tmp_path, cli=None, authed=True):
@@ -66,23 +67,45 @@ async def test_presync_reprobes_only_when_flagged_out(tmp_path):
     assert ("checkAuth",) not in cli.calls
 
 
+async def test_presync_survives_missing_cli(tmp_path):
+    # A missing CLI must not fail the sync (HA-side backups included).
+    src, _ = make_source(tmp_path, cli=make_cli(tmp_path, str(tmp_path / "nope")))
+    await src.preSync()  # must not raise
+    assert src.enabled() is False
+
+
 async def test_presync_recovers_after_outage(tmp_path):
     # An internet outage can leave the CLI wrapper flagged as signed out even
     # though the on-disk session is still valid.  Once connectivity is back,
     # the pre-sync probe must re-enable the destination without user action.
-    import stat
-    from backup.proton import ProtonCli
-    script = tmp_path / "fake-proton"
-    script.write_text('#!/usr/bin/env bash\necho "{\\"name\\": \\"my-files\\"}"\n')
-    script.chmod(script.stat().st_mode | stat.S_IRWXU)
-    cfg = Config()
-    cfg.override(Setting.PROTON_CLI_PATH, str(script))
-    cfg.override(Setting.PROTON_DATA_PATH, str(tmp_path / "proton"))
-    cfg.override(Setting.PROTON_DRIVE_TIMEOUT_SECONDS, 5)
-    src, _ = make_source(tmp_path, cli=ProtonCli(cfg))
+    binary = write_script(tmp_path, 'echo "{\\"name\\": \\"my-files\\"}"\n')
+    src, _ = make_source(tmp_path, cli=make_cli(tmp_path, binary))
     assert src.enabled() is False  # flagged out, e.g. by a probe during the outage
     await src.preSync()
     assert src.enabled() is True
+
+
+async def test_signout_logs_out_and_resets_state(tmp_path):
+    src, cli = make_source(tmp_path)
+    await src.get()  # ensures the folder and caches state
+    assert src._folder_ensured is True
+    await src.signOut()
+    assert ("logout",) in cli.calls
+    assert cli.isAuthenticated() is False
+    assert src._folder_ensured is False
+    assert src._meta_cache == {}
+
+
+async def test_signout_tolerates_already_signed_out(tmp_path):
+    src, cli = make_source(tmp_path)
+    src._folder_ensured = True
+
+    async def dead_session_logout():
+        raise ProtonNotAuthenticated("no session")
+    cli.logout = dead_session_logout
+
+    await src.signOut()  # must not raise
+    assert src._folder_ensured is False
 
 
 def test_needs_configuration_when_upload_disabled(tmp_path):

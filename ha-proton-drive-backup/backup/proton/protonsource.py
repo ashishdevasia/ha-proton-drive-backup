@@ -65,7 +65,21 @@ class ProtonSource(BackupDestination, Startable):
         # While flagged as signed out, the sync loop never consults this
         # destination, so this re-probe is the only path back to enabled.
         if not self.cli.isAuthenticated():
-            await self.cli.checkAuth()
+            try:
+                await self.cli.checkAuth()
+            except Exception as e:
+                # Never fail the sync (and HA-side backups) over the probe.
+                logger.warning("Couldn't re-check Proton Drive authentication: " + str(e))
+
+    async def signOut(self):
+        try:
+            await self.cli.logout()
+        except ProtonNotAuthenticated:
+            pass  # already signed out
+        # Drop per-account state in case the next sign-in is a different account.
+        self._folder_ensured = False
+        self._meta_cache.clear()
+        self._account = None
 
     def name(self) -> str:
         return SOURCE_PROTON_DRIVE
@@ -142,20 +156,20 @@ class ProtonSource(BackupDestination, Startable):
             # do NOT create on a generic error (transient/auth/timeout all
             # propagate), because a blind create on a transient failure would
             # split backups across two folders.
-            entries = await self.cli.listFolder(PROTON_ROOT)
-            names = {_entry_name(e) for e in entries}
-            if self.folderName() not in names:
+            if self.folderName() not in await self._rootFolderNames():
                 logger.info("Creating Proton Drive backup folder '{}'".format(self.folderName()))
                 try:
                     await self.cli.createFolder(PROTON_ROOT, self.folderName())
                 except ProtonError:
                     # Verify by re-listing instead of parsing the error text:
                     # a concurrent writer may have created it since we listed.
-                    entries = await self.cli.listFolder(PROTON_ROOT)
-                    if self.folderName() not in {_entry_name(e) for e in entries}:
+                    if self.folderName() not in await self._rootFolderNames():
                         raise
                     logger.info("Folder '{}' already exists, reusing it".format(self.folderName()))
             self._folder_ensured = True
+
+    async def _rootFolderNames(self):
+        return {_entry_name(e) for e in await self.cli.listFolder(PROTON_ROOT)}
 
     # --- Reading the current state ---------------------------------------------
 

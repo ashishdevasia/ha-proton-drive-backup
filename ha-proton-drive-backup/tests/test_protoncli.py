@@ -1,32 +1,12 @@
 import asyncio
-import os
-import stat
 
 import pytest
 
-from backup.config import Config, Setting
-from backup.proton import ProtonCli
+from backup.config import Setting
 from backup.proton.exceptions import (ProtonNotAuthenticated, ProtonCliMissing,
                                       ProtonTimeout, ProtonError,
                                       ProtonConnectionError)
-
-
-def write_script(tmp_path, body):
-    """Create an executable fake proton-drive that logs its args and runs body."""
-    path = tmp_path / "fake-proton"
-    script = "#!/usr/bin/env bash\n" + 'echo "$@" >> "' + str(tmp_path / "args.log") + '"\n' + body
-    path.write_text(script)
-    path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IRWXU)
-    return str(path)
-
-
-def make_cli(tmp_path, binary):
-    cfg = Config()
-    cfg.override(Setting.PROTON_CLI_PATH, binary)
-    cfg.override(Setting.PROTON_DATA_PATH, str(tmp_path / "data"))
-    cfg.override(Setting.PROTON_DRIVE_TIMEOUT_SECONDS, 5)
-    cfg.override(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS, 5)
-    return ProtonCli(cfg)
+from tests.fakes import write_script, make_cli
 
 
 def args_log(tmp_path):
@@ -196,6 +176,131 @@ async def test_details_code_alone_is_network(tmp_path):
     assert cli.isAuthenticated() is True
 
 
+async def test_code_inside_quoted_value_is_not_network(tmp_path):
+    # A user-controlled name echoed into the details dump must not classify.
+    binary = write_script(tmp_path, (
+        "cat >&2 <<'EOF'\n"
+        "error: not found\n"
+        "Error details:\n"
+        "{\n"
+        "  path: \"/my-files/code: 'ConnectionRefused'\"\n"
+        "}\n"
+        "EOF\n"
+        "exit 1\n"))
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert cli.isAuthenticated() is True
+
+
+async def test_connection_message_embedded_midline_is_not_network(tmp_path):
+    binary = write_script(
+        tmp_path,
+        'echo "no file named \'Unable to connect. Is the computer able to access the url?\'" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+
+
+async def test_error_prefixed_connection_message_is_network(tmp_path):
+    binary = write_script(
+        tmp_path,
+        'echo "error: Unable to connect. Is the computer able to access the url?" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonConnectionError):
+        await cli.info("/my-files")
+
+
+async def test_connection_error_not_raised_when_best_effort(tmp_path):
+    # check=False callers (best-effort trash, logout) must not fail on a blip.
+    binary = write_offline_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    await cli.trash("/my-files/HA/x.tar")  # must not raise
+
+
+async def test_logout_network_failure_stays_signed_in(tmp_path):
+    # v0.4.6 logout is local-only; if a future CLI fails it on network, the
+    # session likely survived — don't fake a sign-out the next probe undoes.
+    binary = write_offline_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    with pytest.raises(ProtonConnectionError):
+        await cli.logout()
+    assert cli.isAuthenticated() is True
+
+
+async def test_logout_tolerates_benign_failure(tmp_path):
+    binary = write_script(tmp_path, 'echo "already logged out" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    await cli.logout()  # must not raise
+    assert cli.isAuthenticated() is False
+
+
+async def test_logout_refuses_while_command_running(tmp_path):
+    binary = write_script(tmp_path, 'sleep 2\necho "{}"\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    task = asyncio.create_task(cli.info("/my-files"))
+    await asyncio.sleep(0.3)  # let it take the lock
+    with pytest.raises(ProtonError):
+        await cli.logout()
+    assert cli.isAuthenticated() is True
+    await task
+
+
+async def test_unclassified_probe_failure_sets_warning(tmp_path):
+    binary = write_script(tmp_path, 'echo "unexpected server error" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    assert await cli.checkAuth() is True  # state kept
+    assert cli.authWarning() is not None
+
+
+async def test_warning_not_set_when_signed_out(tmp_path):
+    binary = write_script(tmp_path, 'echo "unexpected server error" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    assert await cli.checkAuth() is False
+    assert cli.authWarning() is None
+
+
+async def test_warning_not_set_when_offline(tmp_path):
+    binary = write_offline_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    await cli.checkAuth()
+    assert cli.authWarning() is None
+
+
+async def test_warning_cleared_on_successful_probe(tmp_path):
+    binary = write_script(tmp_path, 'echo "{\\"name\\": \\"my-files\\"}"\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    cli._auth_warning = "stale"
+    assert await cli.checkAuth() is True
+    assert cli.authWarning() is None
+
+
+async def test_warning_cleared_on_definite_signout(tmp_path):
+    binary = write_script(tmp_path, 'echo "You need to login first" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    cli._auth_warning = "stale"
+    assert await cli.checkAuth() is False
+    assert cli.authWarning() is None
+
+
+async def test_start_login_offline_raises_connection_error(tmp_path):
+    binary = write_script(
+        tmp_path,
+        'echo "Unable to connect. Is the computer able to access the url?"\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonConnectionError):
+        await cli.startLogin()
+    assert cli.loginInProgress() is False
+
+
 async def test_checkauth_keeps_state_on_timeout(tmp_path):
     binary = write_script(tmp_path, 'sleep 5\n')
     cli = make_cli(tmp_path, binary)
@@ -298,6 +403,19 @@ async def test_start_login_missing_binary(tmp_path):
     cli = make_cli(tmp_path, str(tmp_path / "nope"))
     with pytest.raises(ProtonCliMissing):
         await cli.startLogin()
+
+
+async def test_checkauth_skipped_during_interactive_login(tmp_path):
+    # The CLI isn't documented as concurrency-safe; don't race `auth login`.
+    binary = write_script(tmp_path, LOGIN_BLOCK + "sleep 30\n")
+    cli = make_cli(tmp_path, binary)
+    try:
+        await cli.startLogin()
+        invocations = len(args_log(tmp_path))
+        assert await cli.checkAuth() is False  # cached state, no probe
+        assert len(args_log(tmp_path)) == invocations
+    finally:
+        await cli.cancelLogin()
 
 
 async def test_concurrent_start_login_dedupes(tmp_path):

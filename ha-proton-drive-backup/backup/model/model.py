@@ -205,9 +205,9 @@ class Model():
                 raise Exception(self.simulate_error)
             else:
                 raise SimulatedError(self.simulate_error)
-        await self.source.preSync()
-        await self.dest.preSync()
-        await self._syncBackups([self.source, self.dest], now)
+        for source in self.allSources():
+            await source.preSync()
+        await self._syncBackups(self.allSources(), now)
 
         self.source.checkBeforeChanges()
         self.dest.checkBeforeChanges()
