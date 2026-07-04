@@ -6,6 +6,7 @@
   its own once connectivity returns.
 - Added a Sign out button (About page) — previously the only way to switch
   accounts was wiping the add-on's data.
+- Fixed the three-dots menu on ignored backups being rendered semi-transparent.
 
 ## v0.1.0 [2026-07-01]
 

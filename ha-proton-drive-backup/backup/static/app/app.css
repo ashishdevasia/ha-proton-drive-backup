@@ -297,6 +297,7 @@ a { color: var(--accent); }
 .backup:hover { border-color: var(--stroke-strong); background: var(--bg-2); }
 .backup.pending { border-color: color-mix(in srgb, var(--info) 40%, transparent); }
 .backup.ignored { opacity: .62; }
+.backup.ignored:has(.menu) { opacity: 1; }
 .backup.uploading { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .backup-top { display: flex; align-items: flex-start; gap: 14px; }
 .backup-title { font-weight: 700; font-size: 1.02rem; word-break: break-word; }
