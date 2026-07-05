@@ -416,8 +416,30 @@ class UiServer(Trigger, Startable):
             self.trigger()
         return {
             'message': 'Settings saved',
+            'warning': self._generationalCapWarning(),
             'reload_page': self.config.get(Setting.ENABLE_PROTON_UPLOAD) != old_proton_option
         }
+
+    def _generationalCapWarning(self):
+        slots = self.config.generationalSlotCount()
+        if not slots:
+            return None
+        tight = []
+        for setting, label in ((Setting.MAX_BACKUPS_IN_HA, "Home Assistant"),
+                               (Setting.MAX_BACKUPS_IN_PROTON_DRIVE, "Proton Drive")):
+            # With delete-after-upload the HA cap never applies.
+            if setting == Setting.MAX_BACKUPS_IN_HA and self.config.get(Setting.DELETE_AFTER_UPLOAD):
+                continue
+            cap = self.config.get(setting)
+            if 0 < cap < slots:
+                tight.append('"Keep in {0}" is {1}'.format(label, cap))
+        if not tight:
+            return None
+        warning = ("Your generational settings can keep up to {0} backups but {1}, "
+                   "so the oldest generational backups will still be deleted.".format(
+                       slots, " and ".join(tight)))
+        logger.warning(warning)
+        return warning
 
     # --- Upload / Download / Logs ---------------------------------------------
 
@@ -542,6 +564,9 @@ class UiServer(Trigger, Startable):
         logger.info("Server started")
         self.running = True
         self._starts += 1
+        # Logs the cap-vs-plan warning for setups configured via YAML, which
+        # never hit /saveconfig.
+        self._generationalCapWarning()
 
     def _addRoutes(self, app):
         app.add_routes([web.static('/static/' + str(VERSION), abspath(join(__file__, "..", "..", "static")), append_version=True)])
