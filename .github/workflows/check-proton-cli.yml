@@ -1,0 +1,59 @@
+name: Check Proton Drive CLI version
+
+on:
+  schedule:
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read pinned and latest versions
+        id: versions
+        run: |
+          manifest=$(curl -fsS --max-time 30 https://proton.me/download/drive/cli/version.json)
+          latest=$(jq -r '.Releases[0].Version' <<<"$manifest")
+          released=$(jq -r '.Releases[0].ReleaseDate' <<<"$manifest")
+          pinned=$(yq '.args.PROTON_CLI_VERSION' ha-proton-drive-backup/build.yaml)
+          # fail loudly if either source stops looking like a version
+          [ "$(printf '%s\n%s\n' "$latest" "$pinned" | grep -Ec '^[0-9]+\.[0-9]+\.[0-9]+$')" = 2 ]
+          {
+            echo "latest=$latest"
+            echo "released=$released"
+            echo "pinned=$pinned"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open issue if a newer version exists
+        if: steps.versions.outputs.latest != steps.versions.outputs.pinned
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+          RELEASED: ${{ steps.versions.outputs.released }}
+          PINNED: ${{ steps.versions.outputs.pinned }}
+        run: |
+          title="Proton Drive CLI $LATEST available"
+          gh label create proton-cli-update --force \
+            --description "Proton Drive CLI version bump" --color 0E8A16
+          # dedup: one issue per version, closed counts as handled
+          if gh issue list --state all --label proton-cli-update \
+               --search "in:title \"$title\"" --json title --jq '.[].title' \
+               | grep -Fxq "$title"; then
+            echo "Issue for $LATEST already exists, skipping"
+            exit 0
+          fi
+          gh issue create --title "$title" --label proton-cli-update --body "Proton released CLI **$LATEST** on $RELEASED. The add-on currently pins **$PINNED**.
+
+          - Manifest (checksums per platform): https://proton.me/download/drive/cli/version.json
+          - Source diff: https://github.com/ProtonDriveApps/sdk/compare/cli/v$PINNED...cli/v$LATEST
+
+          To update:
+          - [ ] Bump \`ARG PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/Dockerfile\`
+          - [ ] Bump \`args.PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/build.yaml\`
+          - [ ] Re-verify the CLI error contract still matches \`_classify_failure\` in \`backup/proton/protoncli.py\`"
