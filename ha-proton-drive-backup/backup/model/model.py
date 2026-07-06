@@ -290,10 +290,23 @@ class Model():
             del self.backups[slug]
 
     def getNextPurges(self):
+        # Predict by simulating the next backup
+        now = self.time.now()
+        next_time = self.nextBackup(now) or now
+        pre_purge = self.config.get(Setting.DELETE_BEFORE_NEW_BACKUP)
         purges = {}
         for source in [self.source, self.dest]:
-            purges[source.name()] = self._nextPurge(
-                source, self.backups.values(), findNext=True)[1]
+            if pre_purge:
+                # The pre-purge (count-1, current set) fires first and decides.
+                purges[source.name()] = self._nextPurge(
+                    source, self.backups.values(), findNext=True)[1]
+                continue
+            dummy = DummyBackup("", next_time, source.name(), "dummy_next_backup")
+            proposed = list(self.backups.values())
+            proposed.append(dummy)
+            purge = self._nextPurge(source, proposed)[1]
+            # If the upcoming backup would itself be purged next, no current backup is.
+            purges[source.name()] = None if purge is dummy else purge
         return purges
 
     def _parseTimeOfDay(self, value) -> Optional[Tuple[int, int]]:

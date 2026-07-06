@@ -246,6 +246,13 @@ class Config():
             base.days = 1
         return base
 
+    def generationalSlotCount(self) -> int:
+        # Upper bound of distinct backups the generational plan wants to keep.
+        gen = self.getGenerationalConfig()
+        if not gen:
+            return 0
+        return gen.days + gen.weeks + gen.months + gen.years
+
     def _loadRetained(self) -> List[str]:
         if JsonFileSaver.exists(self.get(Setting.RETAINED_FILE_PATH)):
             try:

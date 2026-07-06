@@ -140,16 +140,16 @@
     if (!toastHost) { toastHost = ce("div", { class: "toasts", "aria-live": "polite", "aria-atomic": "false" }); document.body.appendChild(toastHost); }
     return toastHost;
   }
-  function toast(msg, kind) {
+  function toast(msg, kind, ms) {
     ensureToastHost();
     kind = kind || "info";
-    var ic = kind === "ok" ? "check" : kind === "bad" ? "alert" : "info";
+    var ic = kind === "ok" ? "check" : (kind === "bad" || kind === "warn") ? "alert" : "info";
     var node = ce("div", { class: "toast " + kind, role: "status" }, [iconNode(ic, "t-ico"), ce("div", { text: msg })]);
     toastHost.appendChild(node);
     setTimeout(function () {
       node.classList.add("out");
       setTimeout(function () { if (node.parentNode) node.parentNode.removeChild(node); }, 260);
-    }, 4200);
+    }, ms || 4200);
   }
   // Friendly wrapper: run an API call, show the global activity bar while it is
   // in flight, then toast its message / error. The bar gives immediate feedback
@@ -922,8 +922,8 @@
       fields: [
         { key: "days_between_backups", label: "Days between backups", type: "number", step: "0.1", min: 0, help: "How frequently a new backup is created. 0 disables scheduled backups." },
         { key: "backup_time_of_day", label: "Time of day", type: "time", help: "Local time to create scheduled backups. Leave blank for any time." },
-        { key: "max_backups_in_ha", label: "Keep in Home Assistant", type: "number", min: 0, help: "Most recent backups to keep on this Home Assistant machine. 0 keeps none locally." },
-        { key: "max_backups_in_proton_drive", label: "Keep in Proton Drive", type: "number", min: 0, help: "Most recent backups to keep in Proton Drive." },
+        { key: "max_backups_in_ha", label: "Keep in Home Assistant", type: "number", min: 0, help: "Most recent backups to keep on this Home Assistant machine; the oldest is deleted first. 0 means never delete from Home Assistant — to keep no local copies, enable \"Delete from Home Assistant after upload\" instead." },
+        { key: "max_backups_in_proton_drive", label: "Keep in Proton Drive", type: "number", min: 0, help: "Most recent backups to keep in Proton Drive; the oldest is deleted first. 0 means never delete from Proton Drive." },
         { key: "backup_name", label: "Naming template", type: "text", help: "Template for backup names. Placeholders are shown below.", template: true },
         { key: "backup_password", label: "Backup password", type: "password", help: "Optionally encrypt backups with a password. Leave blank for none." },
         { key: "delete_before_new_backup", label: "Delete old backup before making a new one", type: "bool", help: "Useful when disk space is tight — removes the oldest backup first." },
@@ -953,10 +953,11 @@
     },
     {
       title: "Generational backups", icon: "archive",
-      desc: "Keep a spread of older backups (daily, weekly, monthly, yearly).",
+      desc: "Keep a spread of older backups (daily, weekly, monthly, yearly). While enabled, backups that don't fill one of these slots are deleted once a newer backup exists.",
       advanced: true,
+      dynamicNote: generationalWarningText,
       fields: [
-        { key: "generational_days", label: "Daily backups to keep", type: "number", min: 0 },
+        { key: "generational_days", label: "Daily backups to keep", type: "number", min: 0, help: "0 is treated as 1: the newest backup is always kept, and older backups survive only as weekly/monthly/yearly keepers." },
         { key: "generational_weeks", label: "Weekly backups to keep", type: "number", min: 0 },
         { key: "generational_months", label: "Monthly backups to keep", type: "number", min: 0 },
         { key: "generational_years", label: "Yearly backups to keep", type: "number", min: 0 },
@@ -1029,6 +1030,35 @@
   ];
   function enumOpts(arr) { return arr.map(function (x) { return [x, x]; }); }
 
+  // Effective (draft > saved > default) value of a setting being edited.
+  function effVal(key) {
+    var draft = state.configDraft || {};
+    var cfg = (state.config && state.config.config) || {};
+    var defs = (state.config && state.config.defaults) || {};
+    return (key in draft) ? draft[key] : (cfg[key] != null && cfg[key] !== "" ? cfg[key] : defs[key]);
+  }
+  function effNum(key) { return Number(effVal(key)) || 0; }
+  function effBool(key) { var v = effVal(key); return v === true || v === "true"; }
+
+  // Mirrors Config.generationalSlotCount + the caps check on the backend.
+  function generationalWarningText() {
+    var days = effNum("generational_days"), weeks = effNum("generational_weeks");
+    var months = effNum("generational_months"), years = effNum("generational_years");
+    if (days + weeks + months + years === 0) return null;
+    var slots = Math.max(days, 1) + weeks + months + years;
+    var caps = [["max_backups_in_proton_drive", "Keep in Proton Drive"]];
+    // With delete-after-upload the HA cap never applies.
+    if (!effBool("delete_after_upload")) caps.unshift(["max_backups_in_ha", "Keep in Home Assistant"]);
+    var tight = [];
+    caps.forEach(function (m) {
+      var cap = effNum(m[0]);
+      if (cap > 0 && cap < slots) tight.push("\"" + m[1] + "\" is " + cap);
+    });
+    if (!tight.length) return null;
+    return "This plan can keep up to " + slots + " backups, but " + tight.join(" and ") +
+      ". The oldest generational backups will still be deleted to stay under that limit.";
+  }
+
   var showAdvanced = false;
 
   function viewSettings(host) {
@@ -1051,6 +1081,11 @@
       if (!fields.length) return;
       var body = ce("div", { class: "group-body" });
       if (g.desc) body.appendChild(ce("div", { class: "group-desc", text: g.desc }));
+      if (g.dynamicNote) {
+        var note = ce("div", { class: "group-warning", style: "display:none" });
+        note._compute = g.dynamicNote;
+        body.appendChild(note);
+      }
       fields.forEach(function (f) { body.appendChild(renderField(f, cfg)); });
       var grp = ce("details", { class: "settings-group", open: true }, [
         ce("summary", {}, [iconNode(g.icon), ce("span", { text: g.title }), ce("span", { class: "chev", html: icon("chev") })]),
@@ -1063,6 +1098,17 @@
       ce("button", { class: "btn", type: "submit" }, [iconNode("check"), ce("span", { text: "Save settings" })]),
       ce("button", { class: "btn ghost", type: "button", text: "Reset", onclick: function () { state.configDraft = {}; renderView(); } })
     ]));
+    // Field listeners fire on the target first, so drafts are current here.
+    function refreshNotes() {
+      form.querySelectorAll(".group-warning").forEach(function (note) {
+        var txt = note._compute ? note._compute() : null;
+        note.textContent = txt || "";
+        note.style.display = txt ? "" : "none";
+      });
+    }
+    form.addEventListener("input", refreshNotes);
+    form.addEventListener("change", refreshNotes);
+    refreshNotes();
     card.appendChild(form);
     host.appendChild(card);
   }
@@ -1208,6 +1254,7 @@
     setBusy(true);
     apiJson("/saveconfig", { config: cfg }).then(function (d) {
       toast((d && d.message) || "Settings saved", "ok");
+      if (d && d.warning) toast(d.warning, "warn", 12000);
       state.configDraft = {};   // edits are now persisted server-side
       if (d && d.reload_page) { setTimeout(function () { location.reload(); }, 600); return; }
       loadConfig();

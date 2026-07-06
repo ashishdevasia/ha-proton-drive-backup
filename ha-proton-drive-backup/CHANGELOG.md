@@ -1,3 +1,8 @@
+## v0.1.2 [2026-07-06]
+
+- Fixed the "next to delete" tag pointing at the wrong backup when
+  generational backups are enabled
+
 ## v0.1.1 [2026-07-04]
 
 - Fixed getting stuck "signed out" (with backups paused) after an internet
