@@ -328,6 +328,11 @@ a { color: var(--accent); }
 .loc .tag { font-size: .66rem; padding: 1px 6px; border-radius: 6px; background: var(--bg-3); color: var(--text-dim); }
 
 /* ---- Forms / settings ---------------------------------------------------- */
+.group-warning {
+  font-size: .82rem; color: var(--warn); background: var(--warn-bg);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+  border-radius: var(--radius-sm); padding: 9px 12px; margin: 0 0 14px;
+}
 .field { margin-bottom: 18px; }
 .field > label { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 5px; }
 .field .help { font-size: .82rem; color: var(--text-faint); margin: 2px 0 8px; }
@@ -442,6 +447,8 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .toast.ok .t-ico { color: var(--ok); }
 .toast.bad .t-ico { color: var(--bad); }
 .toast.info .t-ico { color: var(--info); }
+.toast.warn .t-ico { color: var(--warn); }
+.toast.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 
 /* ---- Mock dev panel ------------------------------------------------------ */
 .mock-bar { position: fixed; right: 12px; bottom: 12px; z-index: 300; display: flex; gap: 6px; flex-wrap: wrap;

@@ -21,8 +21,13 @@ Once signed in, backups sync automatically.
 
 ### Core backup options
 
-- `max_backups_in_ha` (default `4`): how many backups to keep in Home Assistant.
-- `max_backups_in_proton_drive` (default `4`): how many backups to keep in Proton Drive.
+- `max_backups_in_ha` (default `4`): how many backups to keep in Home Assistant;
+  the oldest is deleted first. `0` means never delete from Home Assistant (to
+  keep no local copies, use `delete_after_upload` instead). Backups marked
+  "keep forever" or ignored don't count toward this limit.
+- `max_backups_in_proton_drive` (default `4`): how many backups to keep in
+  Proton Drive; the oldest is deleted first. `0` means never delete from
+  Proton Drive.
 - `days_between_backups` (default `3`): how often to create a new backup. `0` disables automatic backups.
 - `backup_name`: template for backup names (e.g. `{type} Backup {year}-{month}-{day}`).
 - `backup_time_of_day`: `HH:MM` time of day to create backups.
@@ -48,6 +53,17 @@ Once signed in, backups sync automatically.
 `generational_years` and the related `generational_*` options enable a
 grandfather-father-son retention scheme. See
 [GENERATIONAL_BACKUP.md](GENERATIONAL_BACKUP.md).
+
+Two things to know when any of these are set:
+
+- `generational_days: 0` is treated as `1` — the newest backup is always kept.
+  Any backup that isn't a daily/weekly/monthly/yearly keeper is deleted as soon
+  as a newer backup exists, so with `days` at 0/1 yesterday's backup is usually
+  the next to go.
+- `max_backups_in_ha` / `max_backups_in_proton_drive` still apply. If the
+  generational plan wants more slots than the max allows (days + weeks +
+  months + years), the oldest keepers are deleted to stay under the max, so
+  set the max at least that high.
 
 ### Web server / UI
 
