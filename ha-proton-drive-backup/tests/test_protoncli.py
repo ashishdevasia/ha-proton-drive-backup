@@ -452,3 +452,113 @@ async def test_delete_is_lenient_on_error(tmp_path):
     cli = make_cli(tmp_path, binary)
     # delete uses check=False, so a non-zero exit should not raise
     await cli.delete("/my-files/HA/x.tar")
+
+
+# --- Corrupt events.lock self-heal --------------------------------------------
+# An unparseable events.lock crashes every CLI run at init (verified against
+# the real binary, v0.4.6-v0.5.0).  The wrapper deletes it and retries once.
+
+def _plant_lock(tmp_path, content: bytes):
+    # conftest pins XDG_DATA_HOME to tmp_path/"xdg-data" for env isolation.
+    lock = tmp_path / "xdg-data" / "proton-drive-cli" / "events.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_bytes(content)
+    return lock
+
+
+def write_crash_while_lock_exists_script(tmp_path):
+    # Mimics the real crash: only a banner on stderr (the stack goes to
+    # stdout), recovering as soon as the lock file is gone.
+    return write_script(tmp_path, (
+        'if [ -e "$XDG_DATA_HOME/proton-drive-cli/events.lock" ]; then\n'
+        '  echo "===============================================" >&2\n'
+        '  echo "SyntaxError: JSON Parse error: Unrecognized token" \n'
+        '  exit 1\n'
+        'fi\n'
+        'echo "{}"\n'))
+
+
+async def test_corrupt_lock_healed_and_retried(tmp_path):
+    lock = _plant_lock(tmp_path, b"\x00" * 13)  # what an unclean shutdown leaves
+    binary = write_crash_while_lock_exists_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    assert await cli.info("/my-files") == {}
+    assert not lock.exists()
+    assert len(args_log(tmp_path)) == 2
+
+
+async def test_corrupt_lock_retry_happens_only_once(tmp_path):
+    # The CLI keeps crashing and leaves a corrupt lock behind every run:
+    # exactly one heal+retry, then the failure surfaces.
+    _plant_lock(tmp_path, b"\x00" * 13)
+    binary = write_script(tmp_path, (
+        'mkdir -p "$XDG_DATA_HOME/proton-drive-cli"\n'
+        'printf \'\\0\\0\\0\' > "$XDG_DATA_HOME/proton-drive-cli/events.lock"\n'
+        'exit 1\n'))
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert len(args_log(tmp_path)) == 2
+
+
+async def test_no_retry_when_lock_is_healthy(tmp_path):
+    lock = _plant_lock(tmp_path, b'{"pid": 999999}')
+    binary = write_script(tmp_path, 'echo "unrelated failure" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert lock.exists()
+    assert len(args_log(tmp_path)) == 1
+
+
+async def test_no_retry_when_lock_is_absent(tmp_path):
+    binary = write_script(tmp_path, 'echo "unrelated failure" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert len(args_log(tmp_path)) == 1
+
+
+async def test_classified_failure_does_not_heal_lock(tmp_path):
+    # A classified failure already explains itself, and the lock crash happens
+    # before the login gate — so an auth answer means the lock isn't the cause.
+    lock = _plant_lock(tmp_path, b"\x00" * 13)
+    binary = write_script(tmp_path, 'echo "You need to login first" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonNotAuthenticated):
+        await cli.info("/my-files")
+    assert lock.exists()
+    assert len(args_log(tmp_path)) == 1
+
+
+async def test_nan_lock_is_treated_as_corrupt(tmp_path):
+    # Python's json accepts NaN/Infinity but Bun's JSON.parse (the CLI) crashes.
+    lock = _plant_lock(tmp_path, b"NaN")
+    binary = write_crash_while_lock_exists_script(tmp_path)
+    cli = make_cli(tmp_path, binary)
+    assert await cli.info("/my-files") == {}
+    assert not lock.exists()
+    assert len(args_log(tmp_path)) == 2
+
+
+async def test_deeply_nested_lock_is_not_deleted(tmp_path):
+    # JSC parses deep nesting iteratively and the CLI then heals the non-object
+    # lock itself; Python's RecursionError must not be read as corruption.
+    lock = _plant_lock(tmp_path, b"[" * 100000 + b"]" * 100000)
+    binary = write_script(tmp_path, 'echo "unrelated failure" >&2\nexit 2\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.info("/my-files")
+    assert lock.exists()
+    assert len(args_log(tmp_path)) == 1
+
+
+def test_events_lock_path_mirrors_cli_resolution(tmp_path):
+    cli = make_cli(tmp_path, "unused")
+    assert (cli._eventsLockPath({"PROTON_DRIVE_CACHE_DIR": "/cache"})
+            == "/cache/events.lock")
+    assert (cli._eventsLockPath({"XDG_DATA_HOME": "/xdg", "HOME": "/h"})
+            == "/xdg/proton-drive-cli/events.lock")
+    # Empty XDG_DATA_HOME falls through to HOME, like the CLI's `||`.
+    assert (cli._eventsLockPath({"XDG_DATA_HOME": "", "HOME": "/h"})
+            == "/h/.local/share/proton-drive-cli/events.lock")
