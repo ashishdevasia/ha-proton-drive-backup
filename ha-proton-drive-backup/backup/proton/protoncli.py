@@ -35,6 +35,11 @@ ERROR_DETAILS_CODE = re.compile(r'^[\s{]*code:\s*[\'"]([A-Za-z]\w*)[\'"]', re.MU
 LOGIN_URL_RE = re.compile(r"https://\S*proton\.me/\S+", re.IGNORECASE)
 
 
+def _reject_json_constant(value):
+    # Bun's JSON.parse has no NaN/Infinity; a lock file holding them is corrupt.
+    raise ValueError("invalid JSON constant: " + value)
+
+
 def _classify_failure(stderr: str):
     """Map a failed command's stderr to a typed exception class, or None."""
     lines = [line.strip() for line in stderr.splitlines()]
@@ -109,6 +114,32 @@ class ProtonCli:
             return await self._runLocked(cmd, cmd_str, effective_timeout, started, check)
 
     async def _runLocked(self, cmd, cmd_str, effective_timeout, started, check):
+        env = self._env()
+        result = await self._execOnce(cmd, cmd_str, effective_timeout, started, env)
+        # An unparseable events.lock crashes every CLI run at init (even `auth
+        # login`) until it's deleted; verify the file itself, don't match text.
+        if (result.returncode != 0 and _classify_failure(result.stderr) is None
+                and self._healCorruptEventsLock(env)):
+            result = await self._execOnce(cmd, cmd_str, effective_timeout,
+                                          time.monotonic(), env)
+
+        # Classify only failed commands, and only from stderr: stdout carries
+        # the JSON payload (user-controlled names) and must never be matched.
+        if result.returncode != 0:
+            error_type = _classify_failure(result.stderr)
+            if error_type is ProtonNotAuthenticated:
+                self._authenticated = False
+                self._auth_warning = None
+                raise ProtonNotAuthenticated(result.message())
+            # check=False callers are best-effort; don't fail them on a blip.
+            if check and error_type is ProtonConnectionError:
+                raise ProtonConnectionError(result.message())
+
+        if check and result.returncode != 0:
+            raise ProtonError(result.message(), result.returncode)
+        return result
+
+    async def _execOnce(self, cmd, cmd_str, effective_timeout, started, env):
         binary = cmd[0]
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -116,7 +147,7 @@ class ProtonCli:
                 stdin=asyncio.subprocess.DEVNULL,   # never let the CLI block on a stdin prompt
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self._env(),
+                env=env,
             )
         except FileNotFoundError:
             raise ProtonCliMissing(binary)
@@ -144,22 +175,44 @@ class ProtonCli:
                     cmd_str, elapsed, proc.returncode, len(stdout), len(stderr))
         if result.returncode != 0 and stderr.strip():
             logger.debug("proton-drive: '%s' stderr: %s", cmd_str, stderr.strip()[:500])
-
-        # Classify only failed commands, and only from stderr: stdout carries
-        # the JSON payload (user-controlled names) and must never be matched.
-        if result.returncode != 0:
-            error_type = _classify_failure(stderr)
-            if error_type is ProtonNotAuthenticated:
-                self._authenticated = False
-                self._auth_warning = None
-                raise ProtonNotAuthenticated(result.message())
-            # check=False callers are best-effort; don't fail them on a blip.
-            if check and error_type is ProtonConnectionError:
-                raise ProtonConnectionError(result.message())
-
-        if check and result.returncode != 0:
-            raise ProtonError(result.message(), result.returncode)
         return result
+
+    def _eventsLockPath(self, env: Dict[str, str]) -> str:
+        # Mirrors the CLI's dir resolution: PROTON_DRIVE_CACHE_DIR overrides
+        # everything; otherwise the lock lives in the XDG data ("app") dir.
+        override = env.get("PROTON_DRIVE_CACHE_DIR")
+        if override:
+            return os.path.join(override, "events.lock")
+        data = env.get("XDG_DATA_HOME") or os.path.join(env["HOME"], ".local", "share")
+        return os.path.join(data, "proton-drive-cli", "events.lock")
+
+    def _healCorruptEventsLock(self, env: Dict[str, str]) -> bool:
+        """
+        Delete events.lock iff it exists but isn't parseable JSON — the one
+        lock state the CLI (verified v0.4.6-v0.5.0) can't recover from: its
+        init tolerates only ENOENT and heals parseable stale locks itself.
+        Returns True if the file was deleted.
+        """
+        path = self._eventsLockPath(env)
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                raw = f.read(1 << 20)   # a healthy lock is ~13 bytes; cap garbage
+        except OSError:
+            return False
+        try:
+            json.loads(raw, parse_constant=_reject_json_constant)
+            return False
+        except RecursionError:
+            return False   # deep nesting: JSC parses it iteratively, no crash
+        except ValueError:
+            pass
+        try:
+            os.unlink(path)
+        except OSError:
+            return False
+        logger.warning("Deleted corrupt proton-drive lock file %s "
+                       "(it blocks every Proton Drive command); retrying", path)
+        return True
 
     async def _run_json(self, args: List[str], timeout: Optional[float] = None) -> Any:
         # The CLI treats the first token as the command, so global flags like
@@ -385,8 +438,8 @@ class ProtonCli:
                               "Try signing out again in a moment.")
         result = await self._run(["auth", "logout"], check=False)
         if result.returncode != 0 and _classify_failure(result.stderr) is ProtonConnectionError:
-            # v0.4.6 logout is local-only (can't fail on network); guard future
-            # versions — a fake sign-out would be undone by the next probe.
+            # Logout is local-only through v0.5.0 (can't fail on network); guard
+            # future versions — a fake sign-out would be undone by the next probe.
             raise ProtonConnectionError(result.message())
         self._authenticated = False
         self._auth_warning = None
