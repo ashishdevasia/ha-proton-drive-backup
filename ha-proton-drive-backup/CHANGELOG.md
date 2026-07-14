@@ -1,3 +1,16 @@
+## v0.1.3 [2026-07-15]
+
+- Fixed: a corrupted proton-drive `events.lock` file (NUL-filled after an
+  unclean host shutdown, e.g. a power loss) made every Proton Drive operation
+  fail with `SyntaxError: JSON Parse error` — including signing in again. The
+  add-on now clears the stale lock at startup and self-heals if the corruption
+  appears while running, so affected installs recover by updating or
+  restarting the add-on. See DOCS.md for a manual workaround on older
+  versions.
+- Updated the bundled Proton Drive CLI from 0.4.6 to 0.5.0 (fixes a memory
+  leak during uploads — relevant on low-RAM hosts — and honors the account's
+  telemetry preference). Existing sign-ins carry over.
+
 ## v0.1.2 [2026-07-06]
 
 - Fixed the "next to delete" tag pointing at the wrong backup when
