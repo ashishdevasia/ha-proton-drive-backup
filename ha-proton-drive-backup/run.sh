@@ -28,6 +28,10 @@ KEYRING_PASS_FILE="${PROTON_DATA}/keyring.key"
 
 mkdir -p "${XDG_DATA_HOME}/keyrings" "${XDG_CONFIG_HOME}" "${XDG_CACHE_HOME}" "${PROTON_DATA}/tmp"
 
+# Any leftover CLI events.lock is stale now; a NUL-corrupted one (unclean host
+# shutdown) wedges every proton-drive run, even `auth login`, until deleted.
+rm -rf "${XDG_DATA_HOME}/proton-drive-cli/events.lock"
+
 # Generate a stable keyring password the first time the add-on runs.  It only
 # protects the Proton session at rest inside the already-private /data volume.
 if [ ! -f "${KEYRING_PASS_FILE}" ]; then
