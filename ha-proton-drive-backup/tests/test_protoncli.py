@@ -84,7 +84,12 @@ async def test_checkauth_keeps_state_on_unrecognized_failure(tmp_path):
 
 
 def write_offline_script(tmp_path):
-    """Fake CLI failing exactly like the real one when offline."""
+    """Fake CLI failing on network, with the whole body on stderr.
+
+    NOT the real stream split: v0.4.6-v0.6.0 put only the `===` banner on
+    stderr and everything below it on stdout, so `_classify_failure` (which
+    reads stderr) can't actually see these codes in production.
+    """
     return write_script(tmp_path, (
         "cat >&2 <<'EOF'\n"
         "===============================================\n"
@@ -220,8 +225,8 @@ async def test_connection_error_not_raised_when_best_effort(tmp_path):
 
 
 async def test_logout_network_failure_stays_signed_in(tmp_path):
-    # v0.4.6 logout is local-only; if a future CLI fails it on network, the
-    # session likely survived — don't fake a sign-out the next probe undoes.
+    # A failed sign-out means the session likely survived — don't fake one the
+    # next probe undoes.  Only passes on this fixture's stderr shape.
     binary = write_offline_script(tmp_path)
     cli = make_cli(tmp_path, binary)
     cli._authenticated = True

@@ -45,19 +45,6 @@
       return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
     });
   }
-  // Render 'quoted' fragments as inline <code>. We walk the *raw* string and
-  // esc() each piece individually — escaping the whole thing first would turn
-  // the quotes into &#39; so the match could never fire. Input may contain
-  // CLI/remote text, so every emitted piece is escaped (never raw HTML).
-  function escWithCode(s) {
-    s = String(s == null ? "" : s);
-    var out = "", last = 0, re = /'([^']+?)'/g, m;
-    while ((m = re.exec(s))) {
-      out += esc(s.slice(last, m.index)) + "<code>" + esc(m[1]) + "</code>";
-      last = m.index + m[0].length;
-    }
-    return out + esc(s.slice(last));
-  }
 
   // ------------------------------------------------------------------------
   // Inline SVG icons (no icon font / no CDN)
@@ -660,7 +647,7 @@
       iconNode("alert", "b-ico"),
       ce("div", { class: "b-body" }, [
         ce("div", { class: "b-title", text: errorTitle(e) }),
-        (function () { var m = ce("div", { class: "b-msg" }); m.innerHTML = escWithCode(e.message || "An error occurred."); return m; })(),
+        ce("div", { class: "b-msg", text: e.message || "An error occurred." }),
         s.last_error_count > 1 ? ce("div", { class: "muted", style: "font-size:.8rem;margin-top:6px", text: "Happened " + s.last_error_count + " times in a row." }) : null,
         ce("div", { class: "b-actions" }, actions.map(function (a) {
           return ce("button", { class: a.cls || "btn ghost", text: a.label, onclick: a.fn });
@@ -1530,7 +1517,7 @@
   // ---- Error details ----
   function openErrorDetails(e) {
     var body = [
-      (function () { var m = ce("p", {}); m.innerHTML = escWithCode(e.message || ""); return m; })(),
+      ce("p", { text: e.message || "" }),
       e.details ? ce("pre", { class: "log-view", text: e.details }) : null
     ];
     var foot = [

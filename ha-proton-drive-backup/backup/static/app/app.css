@@ -466,7 +466,6 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .nowrap { white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; }
 .hidden { display: none !important; }
-code, .code { font-family: var(--mono); font-size: .85em; background: rgba(0,0,0,.35); padding: 2px 6px; border-radius: 6px; color: color-mix(in srgb, var(--accent) 60%, #9fe6b0); }
 
 /* dropdown menu */
 .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 190px;

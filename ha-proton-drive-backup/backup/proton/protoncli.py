@@ -438,7 +438,8 @@ class ProtonCli:
                               "Try signing out again in a moment.")
         result = await self._run(["auth", "logout"], check=False)
         if result.returncode != 0 and _classify_failure(result.stderr) is ProtonConnectionError:
-            # A network failure must not read as a successful sign-out.
+            # Can't fire today (the CLI puts network errors on stdout), so a
+            # failed sign-out still reads as success; kept for if that changes.
             raise ProtonConnectionError(result.message())
         self._authenticated = False
         self._auth_warning = None
