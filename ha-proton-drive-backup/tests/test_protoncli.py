@@ -456,7 +456,7 @@ async def test_delete_is_lenient_on_error(tmp_path):
 
 # --- Corrupt events.lock self-heal --------------------------------------------
 # An unparseable events.lock crashes every CLI run at init (verified against
-# the real binary, v0.4.6-v0.5.0).  The wrapper deletes it and retries once.
+# the real binary, v0.4.6-v0.6.0).  The wrapper deletes it and retries once.
 
 def _plant_lock(tmp_path, content: bytes):
     # conftest pins XDG_DATA_HOME to tmp_path/"xdg-data" for env isolation.

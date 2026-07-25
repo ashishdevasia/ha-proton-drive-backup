@@ -2,7 +2,7 @@ build_from:
   amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
   aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm
 args:
-  PROTON_CLI_VERSION: "0.5.0"
+  PROTON_CLI_VERSION: "0.6.0"
 labels:
   org.opencontainers.image.title: Home Assistant Proton Drive Backup
   org.opencontainers.image.source: https://github.com/ashishdevasia/ha-proton-drive-backup
