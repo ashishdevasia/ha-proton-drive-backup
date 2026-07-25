@@ -189,7 +189,7 @@ class ProtonCli:
     def _healCorruptEventsLock(self, env: Dict[str, str]) -> bool:
         """
         Delete events.lock iff it exists but isn't parseable JSON — the one
-        lock state the CLI (verified v0.4.6-v0.5.0) can't recover from: its
+        lock state the CLI (verified v0.4.6-v0.6.0) can't recover from: its
         init tolerates only ENOENT and heals parseable stale locks itself.
         Returns True if the file was deleted.
         """
@@ -438,8 +438,8 @@ class ProtonCli:
                               "Try signing out again in a moment.")
         result = await self._run(["auth", "logout"], check=False)
         if result.returncode != 0 and _classify_failure(result.stderr) is ProtonConnectionError:
-            # Logout is local-only through v0.5.0 (can't fail on network); guard
-            # future versions — a fake sign-out would be undone by the next probe.
+            # Can't fire today (the CLI puts network errors on stdout), so a
+            # failed sign-out still reads as success; kept for if that changes.
             raise ProtonConnectionError(result.message())
         self._authenticated = False
         self._auth_warning = None

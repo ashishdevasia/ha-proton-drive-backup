@@ -1,6 +1,6 @@
 {
   "name": "Home Assistant Proton Drive Backup",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "slug": "hassio_proton_drive_backup",
   "description": "Automatically manage backups between Home Assistant and Proton Drive",
   "arch": ["aarch64", "amd64"],

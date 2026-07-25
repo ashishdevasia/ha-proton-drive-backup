@@ -1,3 +1,8 @@
+## v0.1.4 [2026-07-25]
+
+- Updated the bundled Proton Drive CLI from 0.5.0 to 0.6.0
+- UI fixes
+
 ## v0.1.3 [2026-07-15]
 
 - Fixed: a corrupted proton-drive `events.lock` (after an unclean shutdown) blocked every operation, even sign-in;
