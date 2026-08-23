@@ -86,7 +86,7 @@ async def test_checkauth_keeps_state_on_unrecognized_failure(tmp_path):
 def write_offline_script(tmp_path):
     """Fake CLI failing on network, with the whole body on stderr.
 
-    NOT the real stream split: v0.4.6-v0.6.0 put only the `===` banner on
+    NOT the real stream split: v0.4.6-v0.8.0 put only the `===` banner on
     stderr and everything below it on stdout, so `_classify_failure` (which
     reads stderr) can't actually see these codes in production.
     """
@@ -363,7 +363,16 @@ async def test_upload_command_args(tmp_path):
     cli = make_cli(tmp_path, binary)
     await cli.upload("/tmp/x.tar", "/my-files/HA")
     line = args_log(tmp_path)[-1]
-    assert line == "filesystem upload -c replace /tmp/x.tar /my-files/HA"
+    assert line == "filesystem upload -f replace -d skip /tmp/x.tar /my-files/HA"
+
+
+async def test_download_command_args(tmp_path):
+    binary = write_script(tmp_path, 'exit 0\n')
+    cli = make_cli(tmp_path, binary)
+    await cli.download("/my-files/HA/x.tar", "/tmp/dl")
+    line = args_log(tmp_path)[-1]
+    # "remove" (not "replace"): download's own strategy vocabulary.
+    assert line == "filesystem download -f remove -d skip /my-files/HA/x.tar /tmp/dl"
 
 
 LOGIN_BLOCK = (
@@ -461,7 +470,7 @@ async def test_delete_is_lenient_on_error(tmp_path):
 
 # --- Corrupt events.lock self-heal --------------------------------------------
 # An unparseable events.lock crashes every CLI run at init (verified against
-# the real binary, v0.4.6-v0.6.0).  The wrapper deletes it and retries once.
+# the real binary, v0.4.6-v0.8.0).  The wrapper deletes it and retries once.
 
 def _plant_lock(tmp_path, content: bytes):
     # conftest pins XDG_DATA_HOME to tmp_path/"xdg-data" for env isolation.
