@@ -88,24 +88,24 @@ async def test_presync_recovers_after_outage(tmp_path):
 async def test_signout_logs_out_and_resets_state(tmp_path):
     src, cli = make_source(tmp_path)
     await src.get()  # ensures the folder and caches state
-    assert src._folder_ensured is True
+    assert src._ensured_path == src.folderPath()
     await src.signOut()
     assert ("logout",) in cli.calls
     assert cli.isAuthenticated() is False
-    assert src._folder_ensured is False
+    assert src._ensured_path is None
     assert src._meta_cache == {}
 
 
 async def test_signout_tolerates_already_signed_out(tmp_path):
     src, cli = make_source(tmp_path)
-    src._folder_ensured = True
+    src._ensured_path = src.folderPath()
 
     async def dead_session_logout():
         raise ProtonNotAuthenticated("no session")
     cli.logout = dead_session_logout
 
     await src.signOut()  # must not raise
-    assert src._folder_ensured is False
+    assert src._ensured_path is None
 
 
 def test_needs_configuration_when_upload_disabled(tmp_path):
@@ -133,17 +133,21 @@ async def test_get_pairs_tar_and_metadata(tmp_path):
     assert b.size() == len(b"tarcontents")
 
 
-def test_folder_name_sanitized(tmp_path):
+def test_folder_name_supports_nesting(tmp_path):
     src, _ = make_source(tmp_path)
-    src.config.override(Setting.PROTON_FOLDER_NAME, "  My/Backups\\here  ")
-    assert src.folderName() == "My-Backups-here"
-    assert "/" not in src.folderName()
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    assert src.folderSegments() == ["backups", "ha"]
+    assert src.folderName() == "backups/ha"
+    assert src.folderPath() == "/my-files/backups/ha"
+    # Backslashes separate too, and whitespace is stripped per segment.
+    src.config.override(Setting.PROTON_FOLDER_NAME, "  My/ Backups\\here  ")
+    assert src.folderSegments() == ["My", "Backups", "here"]
     src.config.override(Setting.PROTON_FOLDER_NAME, "")
     assert src.folderName() == "Home Assistant Backups"
 
 
 def test_folder_name_strips_leading_dash(tmp_path):
-    # A leading "-" would be parsed by the CLI as a flag, since the name is
+    # A leading "-" would be parsed by the CLI as a flag, since each segment is
     # passed to `create-folder` as a positional argv token.
     src, _ = make_source(tmp_path)
     src.config.override(Setting.PROTON_FOLDER_NAME, "-rf nope")
@@ -151,30 +155,44 @@ def test_folder_name_strips_leading_dash(tmp_path):
     assert src.folderName() == "rf nope"
     src.config.override(Setting.PROTON_FOLDER_NAME, "--all")
     assert src.folderName() == "all"
-    # Collapses to dashes then empties out -> falls back to the default name.
+    # Sanitization applies per segment.
+    src.config.override(Setting.PROTON_FOLDER_NAME, "-a/--b")
+    assert src.folderSegments() == ["a", "b"]
+    # Stripping reaches a fixpoint: a dash hiding behind whitespace must not
+    # survive ("- -rf" would otherwise sanitize to "-rf").
+    src.config.override(Setting.PROTON_FOLDER_NAME, "- -rf x")
+    assert src.folderSegments() == ["rf x"]
+    src.config.override(Setting.PROTON_FOLDER_NAME, "a/- --json")
+    assert src.folderSegments() == ["a", "json"]
+    src.config.override(Setting.PROTON_FOLDER_NAME, "- ..")  # dash then traversal
+    assert src.folderSegments() == ["Home Assistant Backups"]
+    # Every segment empties out -> falls back to the default name.
     src.config.override(Setting.PROTON_FOLDER_NAME, "/-/-")
     assert src.folderName() == "Home Assistant Backups"
 
 
 def test_folder_name_rejects_dot_traversal(tmp_path):
-    # A name made entirely of dots would make folderPath() resolve to the drive
-    # root or its parent; it must fall back to the default name instead.
+    # A segment made entirely of dots would make folderPath() escape toward (or
+    # past) the drive root; such segments are dropped.
     src, _ = make_source(tmp_path)
     for traversal in (".", "..", "..."):
         src.config.override(Setting.PROTON_FOLDER_NAME, traversal)
         assert src.folderName() == "Home Assistant Backups"
         assert src.folderPath() == PROTON_ROOT + "/Home Assistant Backups"
+    # Dot and empty segments are dropped from nested paths too.
+    src.config.override(Setting.PROTON_FOLDER_NAME, "a//./../b")
+    assert src.folderSegments() == ["a", "b"]
     # A name that merely contains dots is still allowed.
-    src.config.override(Setting.PROTON_FOLDER_NAME, "..backups")
-    assert src.folderName() == "..backups"
+    src.config.override(Setting.PROTON_FOLDER_NAME, "..backups/ha")
+    assert src.folderSegments() == ["..backups", "ha"]
 
 
 async def test_create_folder_never_receives_leading_dash(tmp_path):
     src, cli = make_source(tmp_path)
-    src.config.override(Setting.PROTON_FOLDER_NAME, "-flagish")
+    src.config.override(Setting.PROTON_FOLDER_NAME, "-flagish/-nested")
     await src.get()
     create_calls = [c for c in cli.calls if c[0] == "createFolder"]
-    assert create_calls, "expected the folder to be created"
+    assert len(create_calls) == 2, "expected both folders to be created"
     for _, parent, name in create_calls:
         assert not name.startswith("-")
 
@@ -486,3 +504,451 @@ async def test_start_checks_auth(tmp_path):
     src, cli = make_source(tmp_path)
     await src.start()
     assert ("checkAuth",) in cli.calls
+
+
+# --- Nested folder support -------------------------------------------------
+
+
+async def test_nested_folders_created_segment_by_segment(tmp_path):
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    await src.get()
+    creates = [c for c in cli.calls if c[0] == "createFolder"]
+    assert creates == [("createFolder", "/my-files", "backups"),
+                       ("createFolder", "/my-files/backups", "ha")]
+    assert "/my-files/backups/ha" in cli.folders
+
+
+async def test_nested_folders_create_only_missing_tail(tmp_path):
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    cli.folders.add("/my-files/backups")
+    await src.get()
+    creates = [c for c in cli.calls if c[0] == "createFolder"]
+    assert creates == [("createFolder", "/my-files/backups", "ha")]
+
+
+async def test_nested_folders_fully_existing_create_nothing(tmp_path):
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    cli.folders.add("/my-files/backups")
+    cli.folders.add("/my-files/backups/ha")
+    await src.get()
+    assert not any(c[0] == "createFolder" for c in cli.calls)
+
+
+async def test_file_blocking_path_segment_touches_nothing(tmp_path):
+    # A *file* named like a path segment must produce a clear error; the addon
+    # must not create a duplicate folder next to it and must not trash anything.
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    cli.files["/my-files/backups"] = b"i am someone's file"
+    with pytest.raises(ProtonError, match="exists in Proton Drive as a file"):
+        await src.get()
+    assert not any(c[0] in ("createFolder", "trash", "delete") for c in cli.calls)
+    assert cli.files["/my-files/backups"] == b"i am someone's file"
+
+
+async def test_nested_ensure_reuses_concurrently_created(tmp_path):
+    # Race handling still works per segment: create fails but a re-list shows
+    # a concurrent writer made the folder, so the walk continues.
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    real_create = cli.createFolder
+
+    async def race_create(parent, name):
+        await real_create(parent, name)
+        raise ProtonError("A file or folder with that name already exists", 1)
+    cli.createFolder = race_create
+
+    await src.get()  # must not raise
+    assert "/my-files/backups/ha" in cli.folders
+
+
+async def test_subfolder_named_like_tar_is_never_swept(tmp_path):
+    # A sub-folder whose name ends in ".tar" must not be classified as an
+    # orphaned backup tar: trashing it would trash its entire contents.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.folders.add(folder + "/evil.tar")
+    cli.folders.add(folder + "/notes.metadata.json")
+    cli.files[folder + "/stray.tar"] = b"stray"  # a real orphan file: still swept
+    result = await src.get()
+    assert result == {}
+    trashed = [c[1] for c in cli.calls if c[0] == "trash"]
+    assert folder + "/stray.tar" in trashed
+    assert folder + "/evil.tar" not in trashed
+    assert folder + "/notes.metadata.json" not in trashed
+    assert folder + "/evil.tar" in cli.folders
+
+
+async def test_folder_change_takes_effect_without_restart(tmp_path):
+    # Nothing subscribes to config changes, so the ensured-path latch must
+    # invalidate itself when proton_folder_name changes at runtime.
+    src, cli = make_source(tmp_path)
+    await src.get()
+    src.config.override(Setting.PROTON_FOLDER_NAME, "new/spot")
+    backup = FakeBackup()
+    await src.save(backup, FakeSource(b"payload"))
+    assert "/my-files/new/spot" in cli.folders  # actually re-ensured, not just written blind
+    assert cli.files["/my-files/new/spot/abc123" + TAR_SUFFIX] == b"payload"
+
+
+async def test_save_get_delete_stay_inside_nested_folder(tmp_path):
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    folder = "/my-files/backups/ha"
+    # A sibling file next to the leaf folder must never be touched.
+    cli.folders.add("/my-files/backups")
+    cli.files["/my-files/backups/unrelated.tar"] = b"not ours"
+
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"payload")))
+    assert cli.files[folder + "/abc123" + TAR_SUFFIX] == b"payload"
+    assert "abc123" in await src.get()
+    await src.delete(backup)
+    assert folder + "/abc123" + TAR_SUFFIX not in cli.files
+
+    trashed = [c[1] for c in cli.calls if c[0] == "trash"]
+    assert all(p.startswith(folder + "/") for p in trashed)
+    assert cli.files["/my-files/backups/unrelated.tar"] == b"not ours"
+
+
+async def test_rewrite_metadata_follows_backups_own_folder(tmp_path):
+    # retain/note on a backup uploaded under an old path must update the sidecar
+    # NEXT TO ITS TAR, not in the newly-configured folder, or the pair would be
+    # split across two folders.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    item = await src.save(backup, FakeSource(b"d"))
+    backup.addSource(item)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "new/spot")
+    await src.note(backup, "keep me")
+    meta = json.loads(cli.files["/my-files/HA Backups/abc123" + METADATA_SUFFIX])
+    assert meta["note"] == "keep me"
+    assert "/my-files/new/spot/abc123" + METADATA_SUFFIX not in cli.files
+
+
+async def test_meta_cache_does_not_leak_across_folders(tmp_path):
+    # The metadata cache is keyed by full path: after a folder change, a
+    # same-slug backup in the new folder must not be served the old folder's
+    # sidecar (a stale retained flag could expose it to retention pruning).
+    src, cli = make_source(tmp_path)
+    cli.seed_backup("/my-files/HA Backups", "abc123", meta_bytes(name="from-old"))
+    old = await src.get()
+    assert old["abc123"].name() == "from-old"
+    src.config.override(Setting.PROTON_FOLDER_NAME, "new/spot")
+    cli.folders.add("/my-files/new")
+    cli.seed_backup("/my-files/new/spot", "abc123", meta_bytes(name="from-new"))
+    result = await src.get()
+    assert result["abc123"].name() == "from-new"
+
+
+async def test_orphans_with_unknown_type_are_left_alone(tmp_path):
+    # If a listing entry doesn't say whether it's a file, sweeping it could
+    # trash a folder and all its contents — the sweeps must fail closed.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/mystery.tar"] = b"?"
+    cli.files[folder + "/mystery" + METADATA_SUFFIX] = b"{}"
+    cli.files[folder + "/lonely" + METADATA_SUFFIX] = b"{}"   # orphan sidecar
+    cli.files[folder + "/lonesome.tar"] = b"?"                # orphan tar
+
+    real_list = cli.listFolder
+
+    async def typeless_list(path):
+        return [{k: v for k, v in e.items() if k != "type"} for e in await real_list(path)]
+    cli.listFolder = typeless_list
+
+    await src.get()
+    assert not any(c[0] == "trash" for c in cli.calls)
+
+
+async def test_same_named_file_does_not_shadow_folder(tmp_path):
+    # Proton allows duplicate names.  A file with the same name as the addon's
+    # folder must not make folder resolution fail, whatever the listing order.
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    cli.folders.add("/my-files/backups")
+    cli.folders.add("/my-files/backups/ha")
+
+    real_list = cli.listFolder
+
+    async def with_duplicate(path):
+        entries = await real_list(path)
+        if path == "/my-files":
+            # Listed *after* the folder entry, so it would win a naive
+            # last-write-wins name lookup.
+            entries.append({"name": "backups", "type": "file", "size": 1})
+        return entries
+    cli.listFolder = with_duplicate
+
+    assert "abc123" not in await src.get()  # resolves the folder; must not raise
+
+
+async def test_sweep_skips_names_shared_with_a_folder(tmp_path):
+    # Proton allows duplicate names, and `trash` resolves its path by name: if
+    # a sub-folder shares an orphan file's name, trashing that name could
+    # resolve to the folder.  Such names are never swept.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/dup.tar"] = b"orphan file"
+    cli.files[folder + "/dup2" + METADATA_SUFFIX] = b"{}"
+
+    real_list = cli.listFolder
+
+    async def with_dup_folders(path):
+        entries = await real_list(path)
+        if path == folder:
+            entries.append({"name": "dup.tar", "type": "folder"})
+            entries.append({"name": "dup2" + METADATA_SUFFIX, "type": "folder"})
+        return entries
+    cli.listFolder = with_dup_folders
+
+    await src.get()
+    assert not any(c[0] == "trash" for c in cli.calls)
+
+
+async def test_delete_refuses_when_folder_shares_backup_name(tmp_path):
+    # Same ambiguity for intentional deletes: if a folder shares the tar's
+    # name, refuse rather than let the CLI pick which one to trash.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    folder = "/my-files/HA Backups"
+
+    real_list = cli.listFolder
+
+    async def with_dup_folder(path):
+        entries = await real_list(path)
+        if path == folder:
+            entries.append({"name": "abc123" + TAR_SUFFIX, "type": "folder"})
+        return entries
+    cli.listFolder = with_dup_folder
+
+    with pytest.raises(ProtonError, match="folder named"):
+        await src.delete(backup)
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert backup.getSource(SOURCE_PROTON_DRIVE) is not None
+
+
+async def test_failed_save_cleanup_skips_name_shared_with_folder(tmp_path):
+    # The rollback after a failed upload must not trash a same-named folder:
+    # `trash` resolves by name, so the name must be confirmed a plain file.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    real_upload = cli.upload
+
+    async def failing_meta_upload(local_path, parent_path, conflict="replace"):
+        if local_path.endswith(METADATA_SUFFIX):
+            raise RuntimeError("metadata upload failed")
+        return await real_upload(local_path, parent_path, conflict)
+    cli.upload = failing_meta_upload
+
+    real_list = cli.listFolder
+
+    async def with_dup_folder(path):
+        entries = await real_list(path)
+        if path == folder:
+            entries.append({"name": "abc123" + TAR_SUFFIX, "type": "folder"})
+        return entries
+    cli.listFolder = with_dup_folder
+
+    with pytest.raises(UploadFailed):
+        await src.save(FakeBackup(), FakeSource(b"d"))
+    assert not any(c[0] == "trash" for c in cli.calls)
+
+
+async def test_sweep_rechecks_listing_before_trashing(tmp_path):
+    # Between get()'s initial listing and the sweep, a name can gain a
+    # folder-typed duplicate (sidecar downloads make that window long); the
+    # sweep must consult a fresh listing before trashing.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/stray.tar"] = b"orphan"
+
+    real_list = cli.listFolder
+    leaf_listings = []
+
+    async def racy_list(path):
+        entries = await real_list(path)
+        if path == folder:
+            leaf_listings.append(path)
+            if len(leaf_listings) >= 2:  # only the fresh pre-sweep listing sees it
+                entries.append({"name": "stray.tar", "type": "folder"})
+        return entries
+    cli.listFolder = racy_list
+
+    await src.get()
+    assert len(leaf_listings) >= 2
+    assert not any(c[0] == "trash" for c in cli.calls)
+
+
+async def test_sweep_spares_tar_that_gained_its_sidecar(tmp_path):
+    # A concurrent save() can complete between get()'s first listing and the
+    # sweep; its tar is then paired in the fresh listing and must not be
+    # trashed as an "orphan" (with delete_after_upload that would destroy the
+    # only copy of the backup).
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/racy.tar"] = b"tar"
+
+    real_list = cli.listFolder
+    leaf_listings = []
+
+    async def racy_list(path):
+        entries = await real_list(path)
+        if path == folder:
+            leaf_listings.append(path)
+            if len(leaf_listings) >= 2:  # the sidecar landed before the re-list
+                entries.append({"name": "racy" + METADATA_SUFFIX, "type": "file"})
+        return entries
+    cli.listFolder = racy_list
+
+    await src.get()
+    assert len(leaf_listings) >= 2
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert folder + "/racy.tar" in cli.files
+
+
+async def test_sweep_skips_tars_when_upload_was_in_flight_at_listing(tmp_path):
+    # A save() can finish — flipping _uploading off — right after get()'s
+    # listing, with its sidecar landing after the pre-sweep re-list snapshot
+    # too.  If an upload was in flight when the folder was listed, tar sweeping
+    # is skipped for the whole sync; the next sync sees the truth.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/racy.tar"] = b"tar"
+    src._uploading = True
+
+    real_list = cli.listFolder
+
+    async def racy_list(path):
+        entries = await real_list(path)
+        if path == folder:
+            src._uploading = False  # the save finished right after this listing
+        return entries
+    cli.listFolder = racy_list
+
+    await src.get()
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert folder + "/racy.tar" in cli.files
+
+
+async def test_sweep_skips_tars_when_upload_started_mid_get(tmp_path):
+    # A save() can start after get()'s flag latch was read and finish entirely
+    # within get() — the upload-start counter catches what the flag can't.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/racy.tar"] = b"tar"
+
+    real_list = cli.listFolder
+
+    async def racy_list(path):
+        entries = await real_list(path)
+        if path == folder:
+            src._upload_starts += 1  # a save started (and may have finished)
+        return entries
+    cli.listFolder = racy_list
+
+    await src.get()
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert folder + "/racy.tar" in cli.files
+
+
+async def test_sweep_skips_orphan_tars_while_uploading(tmp_path):
+    # While an upload is in flight, an unpaired tar may simply be one whose
+    # sidecar hasn't been written yet.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/pending.tar"] = b"mid-upload"
+    src._uploading = True
+    await src.get()
+    assert not any(c[0] == "trash" for c in cli.calls)
+    src._uploading = False
+    await src.get()  # no upload anymore: now it really is an orphan
+    assert folder + "/pending.tar" not in cli.files
+
+
+async def test_subfolder_tar_never_becomes_a_backup(tmp_path):
+    # A folder-typed "x.tar" with a *file* sidecar next to it must not be
+    # parsed into a backup (it would show in the UI with a bogus size and fail
+    # read/delete), and neither of the pair may be trashed.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.folders.add(folder + "/abc123" + TAR_SUFFIX)
+    cli.files[folder + "/abc123" + METADATA_SUFFIX] = meta_bytes()
+    result = await src.get()
+    assert result == {}
+    assert cli.download_count == 0
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert folder + "/abc123" + METADATA_SUFFIX in cli.files
+
+
+async def test_delete_refuses_when_unknown_typed_entry_shares_name(tmp_path):
+    # A duplicate whose listing entry carries no type at all must also make
+    # delete() refuse (fail closed), not just a folder-typed one.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    folder = "/my-files/HA Backups"
+
+    real_list = cli.listFolder
+
+    async def with_typeless_dup(path):
+        entries = await real_list(path)
+        if path == folder:
+            entries.append({"name": "abc123" + TAR_SUFFIX})  # no type key
+        return entries
+    cli.listFolder = with_typeless_dup
+
+    with pytest.raises(ProtonError, match="can't be confirmed"):
+        await src.delete(backup)
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert backup.getSource(SOURCE_PROTON_DRIVE) is not None
+
+
+async def test_trash_in_folder_refuses_path_like_names(tmp_path):
+    # The last line of defense on every removal: a separator in the name could
+    # reach outside the backup folder, so it must never hit the CLI.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    await src._trashInFolder(folder, "a\\b.tar")   # best-effort: warn and skip
+    await src._trashInFolder(folder, "a/b.tar")
+    with pytest.raises(ProtonError):
+        await src._trashInFolder(folder, "a\\b.tar", strict=True)
+    assert not any(c[0] == "trash" for c in cli.calls)
+
+
+async def test_backslash_named_entries_are_never_touched(tmp_path):
+    # os.path.basename() doesn't strip "\" on Linux, so a remote name like
+    # "evil\..\x.tar" (creatable via the web UI) could smuggle a separator into
+    # a trash path.  Such entries are ignored entirely.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/evil\\..\\x.tar"] = b"foreign"
+    result = await src.get()
+    assert result == {}
+    assert not any(c[0] == "trash" for c in cli.calls)
+    assert cli.files[folder + "/evil\\..\\x.tar"] == b"foreign"
+
+
+async def test_get_self_heals_when_nested_folder_vanishes(tmp_path):
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PROTON_FOLDER_NAME, "backups/ha")
+    await src.get()  # creates + latches the chain
+    cli.folders.discard("/my-files/backups/ha")
+    cli.folders.discard("/my-files/backups")  # a middle segment vanished too
+    result = await src.get()
+    assert result == {}
+    assert "/my-files/backups/ha" in cli.folders

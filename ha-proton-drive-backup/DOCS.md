@@ -40,7 +40,11 @@ Once signed in, backups sync automatically.
 - `enable_proton_upload` (default `true`): upload backups to Proton Drive. When
   `false`, the app only manages backups inside Home Assistant.
 - `proton_folder_name` (default `Home Assistant Backups`): the folder created
-  under Proton Drive's `/my-files` root.
+  under Proton Drive's `/my-files` root. May be a nested path separated by `/`
+  (e.g. `backups/ha` creates `backups` and `ha` inside it); each missing level is
+  created as needed. Backups live in the last (leaf) folder. See
+  [How backups are stored](#how-backups-are-stored) — this folder is managed by
+  the app.
 - `proton_cli_path` (default `/usr/bin/proton-drive`): path to the bundled CLI.
 - `proton_data_path` (default `/data/proton`): where the CLI session, keyring,
   and temporary transfer files are stored.
@@ -73,12 +77,34 @@ Two things to know when any of these are set:
 
 ## How backups are stored
 
-Each backup becomes two files in the Proton Drive folder:
+`proton_folder_name` names the folder backups go in, relative to Proton Drive's
+`/my-files` root. A `/` (or `\`) nests folders: `backups/ha` means the folder
+`ha` inside the folder `backups`, and any level that doesn't exist yet is
+created. Each path segment is sanitised individually (leading `-` is stripped,
+and empty or all-dot segments like `.` and `..` are dropped); if nothing usable
+is left, the default `Home Assistant Backups` is used.
+
+Each backup becomes two files in that folder:
 
 - `<slug>.tar` — the backup archive.
 - `<slug>.metadata.json` — a small sidecar describing the backup (name, date,
   type, version, protected/retained flags, note). Proton Drive has no
   file-property API, so this sidecar is how the app tracks backups.
+
+> **Warning: the configured folder is managed by the app — give it a folder of
+> its own.** The two files above always come as a pair, so a `.tar` or
+> `.metadata.json` sitting directly inside the folder without its partner is
+> treated as a leftover from an interrupted upload or delete, and is cleaned up
+> (moved to Proton Drive's **trash**, never permanently deleted). Point
+> `proton_folder_name` at a folder dedicated to these backups, not at one that
+> also holds your own files.
+>
+> What the app never touches:
+>
+> - **Sub-folders** inside the configured folder — they are ignored entirely,
+>   along with everything in them.
+> - **Anything outside** the configured folder — including the parent folders it
+>   creates along a nested path, and any sibling files or folders next to them.
 
 The Proton Drive CLI cannot stream, so each upload and download is staged
 through a temporary file under `proton_data_path` (default `/data/proton/tmp`).
