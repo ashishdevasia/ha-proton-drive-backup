@@ -69,7 +69,7 @@ async def test_full_validated_config_is_supervisor_safe():
         "days_between_backups": 2,
         "max_backups_in_ha": 6,
         "max_backups_in_proton_drive": 6,
-        "proton_folder_name": "My Backups",
+        "proton_folder_name": "backups/My Backups",
     })
     update = {k.key(): validated[k] for k in validated}
     await req.updateConfig(update)

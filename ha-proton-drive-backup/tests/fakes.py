@@ -75,6 +75,11 @@ class FakeProtonCli:
 
     async def createFolder(self, parent_path, name):
         self.calls.append(("createFolder", parent_path, name))
+        self._require_auth()
+        # Like the real CLI, creating a folder inside a non-existent parent
+        # fails; this is what catches walk-order bugs in nested creation.
+        if parent_path != "/my-files" and parent_path not in self.folders:
+            raise ProtonError("folder not found: " + parent_path, 1)
         self.folders.add(parent_path + "/" + name)
         return {"name": name}
 
@@ -89,7 +94,8 @@ class FakeProtonCli:
         prefix = path.rstrip("/") + "/"
         for remote, data in self.files.items():
             if remote.startswith(prefix) and "/" not in remote[len(prefix):]:
-                entries.append({"name": os.path.basename(remote), "size": len(data)})
+                entries.append({"name": os.path.basename(remote), "size": len(data),
+                                "type": "file"})
         for folder in self.folders:
             if folder.startswith(prefix) and "/" not in folder[len(prefix):]:
                 entries.append({"name": os.path.basename(folder), "type": "folder"})
@@ -98,6 +104,9 @@ class FakeProtonCli:
     async def upload(self, local_path, parent_path, conflict="replace"):
         self.upload_count += 1
         self.calls.append(("upload", local_path, parent_path, conflict))
+        # Like the real CLI, uploading into a non-existent folder fails.
+        if parent_path.rstrip("/") != "/my-files" and parent_path.rstrip("/") not in self.folders:
+            raise ProtonError("folder not found: " + parent_path, 1)
         with open(local_path, "rb") as f:
             data = f.read()
         self.files[parent_path.rstrip("/") + "/" + os.path.basename(local_path)] = data
@@ -119,6 +128,9 @@ class FakeProtonCli:
             raise ProtonError("trash failed: " + path, 1)
         if path in self.files:
             self.trashed[path] = self.files.pop(path)
+        elif strict:
+            # Like the real CLI, a strict trash of a non-existent item errors.
+            raise ProtonError("not found: " + path, 1)
 
     async def delete(self, path, strict=False):
         # The real CLI permanently deletes ONLY trashed items.
