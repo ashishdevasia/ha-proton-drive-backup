@@ -468,6 +468,78 @@ async def test_delete_is_lenient_on_error(tmp_path):
     await cli.delete("/my-files/HA/x.tar")
 
 
+async def test_trash_command_args_and_results(tmp_path):
+    binary = write_script(tmp_path, 'echo "[{\\"uid\\": \\"abc\\", \\"ok\\": true}]"\n')
+    cli = make_cli(tmp_path, binary)
+    results = await cli.trash("/my-files/HA/x.tar", strict=True)
+    line = args_log(tmp_path)[-1]
+    assert line == "filesystem trash /my-files/HA/x.tar --json"
+    assert results == [{"uid": "abc", "ok": True}]
+
+
+async def test_trash_strict_fails_on_ok_false_result(tmp_path):
+    # The CLI exits 0 even when a node's trash result is ok=false, so strict
+    # mode must catch the failure from the JSON results themselves.
+    binary = write_script(tmp_path, 'echo "[{\\"uid\\": \\"abc\\", \\"ok\\": false}]"\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.trash("/my-files/HA/x.tar", strict=True)
+
+
+async def test_trash_lenient_returns_no_results_on_error(tmp_path):
+    binary = write_script(tmp_path, 'echo "not found" >&2\nexit 1\n')
+    cli = make_cli(tmp_path, binary)
+    assert await cli.trash("/my-files/HA/x.tar") == []
+
+
+async def test_json_payload_wins_over_trailing_log_json(tmp_path):
+    # A log line printed AFTER the payload — even one ending in valid JSON —
+    # must not displace the payload (it would make the folder read as empty or
+    # wrong, and downstream sweeps act on listings).
+    binary = write_script(
+        tmp_path,
+        'echo "[{\\"name\\": \\"a.tar\\"}]"\n'
+        'echo "LOG done {\\"count\\": 1}"\n')
+    cli = make_cli(tmp_path, binary)
+    entries = await cli.listFolder("/my-files/HA")
+    assert [e["name"] for e in entries] == ["a.tar"]
+
+
+async def test_trash_parses_log_prefixed_streaming_array(tmp_path):
+    # The CLI's --json output is a MULTI-LINE streaming array; stray log lines
+    # before it must not collapse the parse to a single item (which would hide
+    # an ok=false from strict mode and starve the purge of its uid).
+    binary = write_script(
+        tmp_path,
+        'echo "LOG [warn]: something"\n'
+        'printf "[\\n{\\"uid\\": \\"a\\", \\"ok\\": false},\\n{\\"uid\\": \\"b\\", \\"ok\\": true}\\n]\\n"\n')
+    cli = make_cli(tmp_path, binary)
+    results = await cli.trash("/my-files/HA/x.tar")
+    assert results == [{"uid": "a", "ok": False}, {"uid": "b", "ok": True}]
+    with pytest.raises(ProtonError):
+        await cli.trash("/my-files/HA/x.tar", strict=True)
+
+
+async def test_trash_strict_catches_ok_false_behind_trailing_log(tmp_path):
+    # A trailing log line breaks whole-array recovery, and salvage degrades to
+    # the single result object; strict mode must still see the ok=false inside
+    # it instead of discarding it as the wrong shape.
+    binary = write_script(
+        tmp_path,
+        'printf "[\\n{\\"uid\\": \\"a\\", \\"ok\\": false}\\n]\\nLOG done\\n"\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.trash("/my-files/HA/x.tar", strict=True)
+
+
+async def test_trash_tolerates_unparseable_output(tmp_path):
+    # A CLI output-shape change must degrade to "no results" (which blocks the
+    # trash purge downstream), never to an error that fails the removal.
+    binary = write_script(tmp_path, 'echo "trashed OK, no json here"\n')
+    cli = make_cli(tmp_path, binary)
+    assert await cli.trash("/my-files/HA/x.tar", strict=True) == []
+
+
 # --- Corrupt events.lock self-heal --------------------------------------------
 # An unparseable events.lock crashes every CLI run at init (verified against
 # the real binary, v0.4.6-v0.8.0).  The wrapper deletes it and retries once.

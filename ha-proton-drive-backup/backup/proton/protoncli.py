@@ -221,27 +221,10 @@ class ProtonCli:
         text = result.stdout.strip()
         if not text:
             return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # Some CLI builds prefix the payload with log lines (which may themselves
-        # contain stray brackets).  Try parsing from each candidate start, and
-        # prefer a whole trailing line that is itself valid JSON.
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line[:1] in ("[", "{"):
-                try:
-                    return json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-        for i, ch in enumerate(text):
-            if ch in "[{":
-                try:
-                    return json.loads(text[i:])
-                except json.JSONDecodeError:
-                    continue
-        raise ProtonError("Could not parse CLI JSON output: " + text[:200], result.returncode)
+        parsed = _salvage_json(text)
+        if parsed is _NO_JSON:
+            raise ProtonError("Could not parse CLI JSON output: " + text[:200], result.returncode)
+        return parsed
 
     # --- High level operations -------------------------------------------------
 
@@ -472,19 +455,96 @@ class ProtonCli:
                          remote_path, local_folder],
                         timeout=self.config.get(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS))
 
-    async def trash(self, path: str, strict: bool = False) -> None:
-        # Moves an item to the Proton Drive trash, which removes it from its
-        # folder (so it stops showing up in listings) without a permanent,
-        # irreversible delete.  This is how the addon "deletes" backups.
-        # strict=True propagates CLI failures so callers can keep local state in
-        # sync with the remote; strict=False is best-effort (used for cleanup).
-        await self._run(["filesystem", "trash", path], check=strict)
+    async def trash(self, path: str, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Move an item to the Proton Drive trash, which removes it from its
+        folder (so it stops showing up in listings) without a permanent,
+        irreversible delete.  strict=True propagates CLI failures so callers
+        can keep local state in sync with the remote; strict=False is
+        best-effort (used for cleanup).
+
+        Returns the CLI's per-node results ({"uid": ..., "ok": ...}; [] when
+        unavailable) so callers know exactly which node was trashed — needed
+        to safely purge it from the trash, where the CLI addresses nodes by
+        bare (non-unique) name.
+        """
+        result = await self._run(["filesystem", "trash", path, "--json"], check=strict)
+        parsed = _salvage_json(result.stdout.strip()) if result.stdout.strip() else None
+        if isinstance(parsed, dict):
+            # Salvage of a cluttered payload can recover a single result
+            # object instead of the array; keep an ok=false inside it visible
+            # to strict mode rather than discarding it as the wrong shape.
+            parsed = [parsed]
+        results = [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
+        # The CLI exits 0 even when a node's trash result is ok=false (only
+        # thrown errors set the exit code — per the CLI source, v0.8.0), so
+        # strict mode must also inspect the results, not just the exit code.
+        if strict:
+            failed = [r for r in results if r.get("ok") is False]
+            if failed:
+                raise ProtonError("proton-drive trash failed for '{}': {}".format(
+                    path, json.dumps(failed)[:500]), result.returncode)
+            if not results:
+                # Exit 0 with no parseable per-node results (output-shape
+                # drift): fall back to trusting the exit code, but say so —
+                # the ok=false channel is blind here.
+                logger.warning("proton-drive trash '%s' exited 0 but returned no "
+                               "parseable results; trusting the exit code", path)
+        return results
 
     async def delete(self, path: str, strict: bool = False) -> None:
         # NOTE: the CLI's `filesystem delete` only operates on items that are
-        # ALREADY in the trash; it errors on live paths.  The addon uses trash()
-        # for removal, so this permanent delete is provided for completeness.
+        # ALREADY in the trash, addressed as "/trash/<name>"; it errors on live
+        # paths.  It resolves <name> by scanning the whole trash and acts on
+        # the first match, so when several trashed items share the name the
+        # caller must rule out ambiguity first (see ProtonSource's purge).
         await self._run(["filesystem", "delete", path], check=strict)
+
+
+# Sentinel distinguishing "no JSON found" from a legitimately parsed None/null.
+_NO_JSON = object()
+
+
+def _salvage_json(text: str) -> Any:
+    """Parse CLI stdout as JSON; returns _NO_JSON when no parse succeeds."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Some CLI builds surround the payload with log lines (which may
+    # themselves contain stray brackets).  The payload can be a MULTI-LINE
+    # streaming array ("[", one item per line, "]"), so first try each
+    # line-START bracket as the payload's beginning, running to the end of the
+    # output.  Restricting candidates to line starts keeps JSON embedded at
+    # the tail of a log line from beating the real payload, while a stray
+    # bracket candidate simply fails to parse (json.loads demands the whole
+    # remainder) and the scan moves on.
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped[:1] in ("[", "{"):
+            try:
+                return json.loads(text[offset + len(line) - len(stripped):])
+            except json.JSONDecodeError:
+                pass
+        offset += len(line)
+    # Then a whole line that is itself valid JSON (a single-line payload with
+    # log lines before and/or after it).
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line[:1] in ("[", "{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    # Last resort: any bracket anywhere in the text.
+    for i, ch in enumerate(text):
+        if ch in "[{":
+            try:
+                return json.loads(text[i:])
+            except json.JSONDecodeError:
+                continue
+    return _NO_JSON
 
 
 def _as_entry_list(data: Any) -> List[Dict[str, Any]]:

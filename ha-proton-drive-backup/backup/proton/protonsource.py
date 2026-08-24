@@ -468,8 +468,15 @@ class ProtonSource(BackupDestination, Startable):
         # converges.  Trash the tar strictly: if it fails we must NOT drop the
         # local source, else the backup reappears next sync.  Metadata is
         # best-effort.
-        await self._trashInFolder(item.folderPath(), item.remoteName(), strict=True)
-        await self._trashInFolder(item.folderPath(), item.metadataName())
+        tar_results = await self._trashInFolder(item.folderPath(), item.remoteName(), strict=True)
+        meta_results = await self._trashInFolder(item.folderPath(), item.metadataName())
+        # Purge only what delete() itself just removed — two validated backup
+        # files the addon owns.  The orphan sweeps deliberately stay
+        # move-to-trash-only, so a user file that merely LOOKS like a leftover
+        # is never permanently destroyed.
+        if self.config.get(Setting.PERMANENTLY_DELETE):
+            await self._purgeFromTrash([(item.remoteName(), tar_results),
+                                        (item.metadataName(), meta_results)])
         self._meta_cache.pop(item.metadataPath(), None)
         backup.removeSource(self.name())
 
@@ -575,7 +582,7 @@ class ProtonSource(BackupDestination, Startable):
         except Exception as e:
             logger.warning("Couldn't clean up orphaned Proton tar for '{}': {}".format(slug, e))
 
-    async def _trashInFolder(self, folder: str, name: str, strict: bool = False):
+    async def _trashInFolder(self, folder: str, name: str, strict: bool = False) -> List[Dict]:
         # Defense in depth for every removal: what's trashed must be a plain
         # file name directly inside the backup folder — a separator in the name
         # would let the trash reach outside it.
@@ -583,8 +590,73 @@ class ProtonSource(BackupDestination, Startable):
             if strict:
                 raise ProtonError("Refusing to trash Proton entry with a path-like name '{}'".format(name))
             logger.warning("Refusing to trash Proton entry with a path-like name '{}'".format(name))
-            return
-        await self.cli.trash(folder + "/" + name, strict=strict)
+            return []
+        return await self.cli.trash(folder + "/" + name, strict=strict)
+
+    async def _purgeFromTrash(self, items: List) -> None:
+        """
+        Permanently delete just-trashed backup files ((name, trash results)
+        pairs) so removed backups don't pile up in the Proton trash, where
+        they'd keep counting toward the storage quota forever (Proton never
+        empties the trash on its own).
+
+        Only delete() calls this — on its two validated backup files — NEVER
+        the orphan sweeps: a user file that merely looks like a leftover stays
+        recoverable in the trash no matter what.
+
+        Best-effort by design: the removal itself already succeeded (the items
+        left the backup folder), so every guard below degrades to the old
+        leave-it-in-the-trash behavior rather than failing the caller.
+        """
+        entries = None
+        for name, trash_results in items:
+            try:
+                # Act only on a positively confirmed trash result: exactly one
+                # node, ok=true, with a uid.  Anything else (trash failed,
+                # output shape changed) leaves nothing safe to match on.
+                uids = {r.get("uid") for r in trash_results
+                        if r.get("ok") is True and isinstance(r.get("uid"), str)}
+                if len(uids) != 1:
+                    logger.debug("Not purging '%s' from the Proton trash: no confirmed trash result", name)
+                    continue
+                if entries is None:   # one trash listing covers all items
+                    # Verified against the CLI source (v0.8.0): `list /trash`
+                    # streams iterateTrashedNodes() to completion (no
+                    # pagination/cap at the CLI layer), and its entries carry
+                    # the same plain-string NodeEntity uid that `trash --json`
+                    # reports — so the completeness and uid checks below are
+                    # sound.  If either contract drifts, the guards fail safe
+                    # (skip the purge, keep the item in the trash).
+                    entries = await self.cli.listFolder("/trash")
+                # `delete /trash/<name>` resolves the name by scanning the
+                # whole trash and acts on the first match, so require the name
+                # to denote exactly the node we just trashed: a same-named item
+                # the *user* trashed must never be the one permanently deleted.
+                matches = [e for e in entries if _entry_name(e) == name]
+                if len(matches) != 1 or matches[0].get("uid") not in uids:
+                    logger.warning(
+                        "Leaving '{}' in the Proton Drive trash: its name doesn't uniquely "
+                        "match the item that was just trashed.".format(name))
+                    continue
+                # Like the sweeps, never permanently delete anything that can't
+                # be confirmed to be a plain file: if the name-resolved trash()
+                # ever took a same-named folder (the race the pre-trash
+                # listings guard against), leaving it recoverable in the trash
+                # caps the damage.
+                if _entry_is_folder(matches[0]) is not False:
+                    logger.warning("Leaving '{}' in the Proton Drive trash: can't confirm "
+                                   "it's a plain file.".format(name))
+                    continue
+                # Residual race: `delete /trash/<name>` re-resolves the name at
+                # delete time (first match wins), so an identically named item
+                # trashed by another client between the listing above and this
+                # call could be the one deleted.  The CLI offers no
+                # uid-addressed delete, so this window can't be closed further.
+                await self.cli.delete("/trash/" + name, strict=True)
+                logger.debug("Permanently deleted '%s' from the Proton Drive trash", name)
+            except Exception as e:
+                logger.warning("Couldn't permanently delete '{}' from the Proton Drive trash "
+                               "(it stays in the trash): {}".format(name, e))
 
     async def read(self, backup: Backup) -> LocalFileStream:
         item = self._validate(backup)

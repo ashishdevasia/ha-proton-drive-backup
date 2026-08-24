@@ -69,6 +69,7 @@
     "proton_data_path": "str?",
     "proton_drive_timeout_seconds": "float(1,)?",
     "proton_transfer_timeout_seconds": "float(1,)?",
+    "permanently_delete": "bool?",
     "delete_ignored_after_days": "float(0,)?",
     "call_backup_snapshot": "bool?",
 

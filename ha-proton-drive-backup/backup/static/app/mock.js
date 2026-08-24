@@ -188,7 +188,7 @@
             days_between_backups: 3, backup_time_of_day: "02:00", max_backups_in_ha: 4, max_backups_in_proton_drive: 4,
             backup_name: "Full Backup {year}-{month}-{day} {hr24}:{min}:{sec}", backup_password: "",
             delete_before_new_backup: false, call_backup_snapshot: false,
-            enable_proton_upload: true, proton_folder_name: "Home Assistant Backups", delete_after_upload: false,
+            enable_proton_upload: true, proton_folder_name: "Home Assistant Backups", delete_after_upload: false, permanently_delete: true,
             upload_limit_bytes_per_second: "", proton_drive_timeout_seconds: 120, proton_transfer_timeout_seconds: 3600,
             exclude_folders: "", exclude_addons: "", exclude_ha_database: false,
             generational_days: 0, generational_weeks: 0, generational_months: 0, generational_years: 0,

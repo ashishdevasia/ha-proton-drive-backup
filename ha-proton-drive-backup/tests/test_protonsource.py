@@ -390,16 +390,144 @@ async def test_delete_failure_keeps_local_source(tmp_path):
     assert folder + "/abc123" + TAR_SUFFIX in cli.files
 
 
-async def test_delete_uses_trash_not_permanent_delete(tmp_path):
-    # The CLI's permanent `delete` only works on already-trashed items, so the
-    # source must remove backups via `trash`, never a live `delete`.
+async def test_delete_purges_trash_by_default(tmp_path):
+    # Trashed items keep counting toward the Proton quota, so by default a
+    # deleted backup is trashed and then purged from the trash (tar + sidecar).
     src, cli = make_source(tmp_path)
     backup = FakeBackup()
     backup.addSource(await src.save(backup, FakeSource(b"d")))
     await src.delete(backup)
     ops = [c[0] for c in cli.calls]
     assert "trash" in ops
-    assert "delete" not in ops
+    # Permanent delete only ever addresses the trash, never a live path.
+    delete_paths = [c[1] for c in cli.calls if c[0] == "delete"]
+    assert delete_paths == ["/trash/abc123" + TAR_SUFFIX,
+                            "/trash/abc123" + METADATA_SUFFIX]
+    assert cli.trashed == []
+
+
+async def test_delete_leaves_backup_in_trash_when_disabled(tmp_path):
+    # permanently_delete=False restores the old move-to-trash-only behavior.
+    src, cli = make_source(tmp_path)
+    src.config.override(Setting.PERMANENTLY_DELETE, False)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    await src.delete(backup)
+    assert not any(c[0] == "delete" for c in cli.calls)
+    assert sorted(t["name"] for t in cli.trashed) == \
+        sorted(["abc123" + TAR_SUFFIX, "abc123" + METADATA_SUFFIX])
+
+
+async def test_purge_skips_ambiguous_trash_name(tmp_path):
+    # `delete /trash/<name>` acts on the FIRST trashed node with that name, so
+    # if the user already has a same-named item in the trash, the purge must
+    # leave both alone rather than gamble on which one the CLI would pick.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    cli.seed_trash("abc123" + TAR_SUFFIX, data=b"the user's own file")
+    await src.delete(backup)
+    delete_paths = [c[1] for c in cli.calls if c[0] == "delete"]
+    # The unambiguous sidecar is still purged; the ambiguous tar is not.
+    assert "/trash/abc123" + TAR_SUFFIX not in delete_paths
+    assert "/trash/abc123" + METADATA_SUFFIX in delete_paths
+    assert [t["name"] for t in cli.trashed] == \
+        ["abc123" + TAR_SUFFIX, "abc123" + TAR_SUFFIX]
+
+
+async def test_purge_failure_does_not_fail_delete(tmp_path):
+    # The removal already succeeded once the trash call went through; a broken
+    # purge (e.g. trash listing fails) must not fail delete() or drop state.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+
+    orig_list = cli.listFolder
+
+    async def failing_trash_list(path):
+        if path == "/trash":
+            raise ProtonError("trash listing broke", 1)
+        return await orig_list(path)
+
+    cli.listFolder = failing_trash_list
+    await src.delete(backup)  # must not raise
+    assert backup.getSource(SOURCE_PROTON_DRIVE) is None
+    assert sorted(t["name"] for t in cli.trashed) == \
+        sorted(["abc123" + TAR_SUFFIX, "abc123" + METADATA_SUFFIX])
+
+
+async def test_purge_skips_on_uid_mismatch(tmp_path):
+    # If the trash listing's sole name match is NOT the node we just trashed
+    # (uid differs), the purge must not gamble that `delete` would pick ours.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+
+    orig_list = cli.listFolder
+
+    async def foreign_trash_list(path):
+        if path != "/trash":
+            return await orig_list(path)
+        return [{"name": {"ok": True, "value": "abc123" + TAR_SUFFIX},
+                 "uid": "uid-someone-elses", "type": "file"}]
+
+    cli.listFolder = foreign_trash_list
+    await src.delete(backup)
+    assert not any(c[0] == "delete" for c in cli.calls)
+
+
+async def test_purge_skips_unconfirmed_file_type(tmp_path):
+    # Never permanently delete anything not confirmed to be a plain file: if
+    # the name-resolved trash took a folder (or the listing stops reporting
+    # types), the item must stay recoverable in the trash.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+
+    orig_list = cli.listFolder
+
+    async def folder_typed_list(path):
+        entries = await orig_list(path)
+        if path == "/trash":
+            for e in entries:
+                e["type"] = "folder"
+        return entries
+
+    cli.listFolder = folder_typed_list
+    await src.delete(backup)
+    assert not any(c[0] == "delete" for c in cli.calls)
+    assert len(cli.trashed) == 2
+
+
+async def test_orphan_sweep_never_purges_trash(tmp_path):
+    # The purge applies ONLY to delete()'s own validated backup files.  The
+    # orphan sweeps act on heuristically matched files the addon may not have
+    # created (e.g. a user's tar without a sidecar), so even with
+    # permanently_delete on they must stay move-to-trash-only.
+    src, cli = make_source(tmp_path)
+    folder = "/my-files/HA Backups"
+    cli.folders.add(folder)
+    cli.files[folder + "/ghost" + METADATA_SUFFIX] = meta_bytes(slug="ghost")
+    cli.files[folder + "/personal.tar"] = b"the user's own archive"
+    await src.get()
+    assert any(c[0] == "trash" for c in cli.calls)
+    assert not any(c[0] == "delete" for c in cli.calls)
+    assert sorted(t["name"] for t in cli.trashed) == \
+        sorted(["ghost" + METADATA_SUFFIX, "personal.tar"])
+
+
+async def test_failed_trash_never_purges_users_same_named_item(tmp_path):
+    # The sidecar's trash is best-effort; when it fails (already gone), a
+    # same-named item the USER trashed must not be purged in its place.
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    del cli.files["/my-files/HA Backups/abc123" + METADATA_SUFFIX]
+    cli.seed_trash("abc123" + METADATA_SUFFIX, data=b"the user's own file")
+    await src.delete(backup)
+    delete_paths = [c[1] for c in cli.calls if c[0] == "delete"]
+    assert delete_paths == ["/trash/abc123" + TAR_SUFFIX]
+    assert [t["name"] for t in cli.trashed] == ["abc123" + METADATA_SUFFIX]
 
 
 async def test_ensure_folder_reuses_existing(tmp_path):
