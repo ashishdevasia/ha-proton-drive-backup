@@ -476,7 +476,7 @@ async def test_loadmetadata_filename_fallback(tmp_path):
 
     orig_download = cli.download
 
-    async def download(remote_path, local_folder, conflict="replace"):
+    async def download(remote_path, local_folder, conflict="remove"):
         # Simulate the CLI writing the sidecar under a decrypted/different name.
         if remote_path.endswith(METADATA_SUFFIX):
             os.makedirs(local_folder, exist_ok=True)

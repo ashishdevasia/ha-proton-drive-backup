@@ -3,13 +3,13 @@ FROM $BUILD_FROM
 
 # Provided by the Home Assistant build system (amd64 / aarch64).
 ARG BUILD_ARCH
-ARG PROTON_CLI_VERSION=0.6.0
+ARG PROTON_CLI_VERSION=0.8.0
 # SHA256 of the official CLI binaries for PROTON_CLI_VERSION (per architecture).
 # Proton publishes SHA-512 checksums at https://proton.me/download/drive/cli/index.html;
 # these are the SHA256 of the same binaries, pinned here and must be refreshed
 # whenever PROTON_CLI_VERSION changes.
-ARG PROTON_CLI_SHA256_AMD64=0c268763bf9cf5e2d18f5cd05e79c63d2b26a996a670f5cddca1d9cfe0a02012
-ARG PROTON_CLI_SHA256_AARCH64=5ab774a71fff67b591ef569ea19c20bcfc5bcab3a41976de2a2001825acfaf0d
+ARG PROTON_CLI_SHA256_AMD64=9443d771719c892790db17e6f02ecd99ad7c53593329f3a67c77677dce577735
+ARG PROTON_CLI_SHA256_AARCH64=086bc4740a73cb8eb4900d51836bff0c332dda390b3f0780d9f805fd5c2a5fe3
 
 WORKDIR /app
 

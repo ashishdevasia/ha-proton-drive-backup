@@ -189,7 +189,7 @@ class ProtonCli:
     def _healCorruptEventsLock(self, env: Dict[str, str]) -> bool:
         """
         Delete events.lock iff it exists but isn't parseable JSON — the one
-        lock state the CLI (verified v0.4.6-v0.6.0) can't recover from: its
+        lock state the CLI (verified v0.4.6-v0.8.0) can't recover from: its
         init tolerates only ENOENT and heals parseable stale locks itself.
         Returns True if the file was deleted.
         """
@@ -462,12 +462,14 @@ class ProtonCli:
 
     async def upload(self, local_path: str, parent_path: str,
                      conflict: str = "replace") -> None:
-        await self._run(["filesystem", "upload", "-c", conflict, local_path, parent_path],
+        await self._run(["filesystem", "upload", "-f", conflict, "-d", "skip",
+                         local_path, parent_path],
                         timeout=self.config.get(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS))
 
     async def download(self, remote_path: str, local_folder: str,
-                       conflict: str = "replace") -> None:
-        await self._run(["filesystem", "download", "-c", conflict, remote_path, local_folder],
+                       conflict: str = "remove") -> None:
+        await self._run(["filesystem", "download", "-f", conflict, "-d", "skip",
+                         remote_path, local_folder],
                         timeout=self.config.get(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS))
 
     async def trash(self, path: str, strict: bool = False) -> None:

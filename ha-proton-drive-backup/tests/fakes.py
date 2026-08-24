@@ -111,7 +111,7 @@ class FakeProtonCli:
             data = f.read()
         self.files[parent_path.rstrip("/") + "/" + os.path.basename(local_path)] = data
 
-    async def download(self, remote_path, local_folder, conflict="replace"):
+    async def download(self, remote_path, local_folder, conflict="remove"):
         self.download_count += 1
         self.calls.append(("download", remote_path, local_folder, conflict))
         if remote_path not in self.files:
