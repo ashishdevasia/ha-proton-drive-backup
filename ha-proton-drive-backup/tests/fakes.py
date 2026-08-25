@@ -70,6 +70,17 @@ class FakeProtonCli:
     async def info(self, path):
         self.calls.append(("info", path))
         self._require_auth()
+        if path.startswith("/trash/"):
+            # Like the real CLI, a trash path resolves by scanning the trash
+            # and returning the FIRST node with that name (the same resolver
+            # `filesystem delete` uses).
+            name = path[len("/trash/"):]
+            for entry in self.trashed:
+                if entry["name"] == name:
+                    return {"name": {"ok": True, "value": entry["name"]},
+                            "uid": entry["uid"], "type": entry.get("type", "file"),
+                            "size": len(entry["data"])}
+            raise ProtonError("Trashed node not found", 1)
         if path in self.folders or path in self.files:
             return {"name": os.path.basename(path)}
         raise ProtonError("not found: " + path, 1)
@@ -117,7 +128,19 @@ class FakeProtonCli:
             raise ProtonError("folder not found: " + parent_path, 1)
         with open(local_path, "rb") as f:
             data = f.read()
-        self.files[parent_path.rstrip("/") + "/" + os.path.basename(local_path)] = data
+        remote = parent_path.rstrip("/") + "/" + os.path.basename(local_path)
+        if remote in self.files:
+            # Mirror the real CLI's file-conflict handling (v0.8.0): identical
+            # content is always skipped (before any strategy applies);
+            # otherwise "replace" moves the old file to the TRASH, while
+            # "create-new-revision" updates the node in place.
+            if self.files[remote] == data:
+                return
+            if conflict == "replace":
+                self.trashed.append({"name": os.path.basename(remote),
+                                     "uid": self._next_uid(),
+                                     "data": self.files[remote]})
+        self.files[remote] = data
 
     async def download(self, remote_path, local_folder, conflict="remove"):
         self.download_count += 1
@@ -148,19 +171,21 @@ class FakeProtonCli:
     async def delete(self, path, strict=False):
         # The real CLI permanently deletes ONLY trashed items, addressed as
         # "/trash/<name>" and resolved by name (first match wins); it errors on
-        # any other path.
+        # any other path.  Returns per-node {"uid", "ok"} results, mirroring
+        # `proton-drive filesystem delete --json`.
         self.calls.append(("delete", path))
         if not path.startswith("/trash/"):
             if strict:
                 raise ProtonError("You can permanently delete items only from trash", 1)
-            return
+            return []
         name = path[len("/trash/"):]
         for i, entry in enumerate(self.trashed):
             if entry["name"] == name:
                 del self.trashed[i]
-                return
+                return [{"uid": entry["uid"], "ok": True}]
         if strict:
             raise ProtonError("Trashed node not found", 1)
+        return []
 
     def _next_uid(self):
         self._uid_counter += 1

@@ -608,7 +608,6 @@ class ProtonSource(BackupDestination, Startable):
         left the backup folder), so every guard below degrades to the old
         leave-it-in-the-trash behavior rather than failing the caller.
         """
-        entries = None
         for name, trash_results in items:
             try:
                 # Act only on a positively confirmed trash result: exactly one
@@ -619,40 +618,49 @@ class ProtonSource(BackupDestination, Startable):
                 if len(uids) != 1:
                     logger.debug("Not purging '%s' from the Proton trash: no confirmed trash result", name)
                     continue
-                if entries is None:   # one trash listing covers all items
-                    # Verified against the CLI source (v0.8.0): `list /trash`
-                    # streams iterateTrashedNodes() to completion (no
-                    # pagination/cap at the CLI layer), and its entries carry
-                    # the same plain-string NodeEntity uid that `trash --json`
-                    # reports — so the completeness and uid checks below are
-                    # sound.  If either contract drifts, the guards fail safe
-                    # (skip the purge, keep the item in the trash).
-                    entries = await self.cli.listFolder("/trash")
+                uid = next(iter(uids))
                 # `delete /trash/<name>` resolves the name by scanning the
-                # whole trash and acts on the first match, so require the name
-                # to denote exactly the node we just trashed: a same-named item
-                # the *user* trashed must never be the one permanently deleted.
-                matches = [e for e in entries if _entry_name(e) == name]
-                if len(matches) != 1 or matches[0].get("uid") not in uids:
+                # trash and acting on the FIRST match, and `info /trash/<name>`
+                # uses the very same resolver (verified in the CLI source,
+                # v0.8.0, both via getTrashedNode; its entity carries the same
+                # plain-string uid that `trash --json` reports).  So probe
+                # which node the name denotes right now, and delete only when
+                # it's exactly the node just trashed: a same-named item the
+                # *user* trashed must never be the one permanently deleted.
+                # Probing also beats listing the whole trash — it stops at the
+                # first match instead of streaming every trashed node on every
+                # delete.  If the contract drifts, the guards fail safe (skip
+                # the purge, keep the item in the trash).
+                entry = await self.cli.info("/trash/" + name)
+                if entry.get("uid") != uid:
                     logger.warning(
-                        "Leaving '{}' in the Proton Drive trash: its name doesn't uniquely "
-                        "match the item that was just trashed.".format(name))
+                        "Leaving '{}' in the Proton Drive trash: its name doesn't resolve "
+                        "to the item that was just trashed.".format(name))
                     continue
                 # Like the sweeps, never permanently delete anything that can't
                 # be confirmed to be a plain file: if the name-resolved trash()
                 # ever took a same-named folder (the race the pre-trash
                 # listings guard against), leaving it recoverable in the trash
                 # caps the damage.
-                if _entry_is_folder(matches[0]) is not False:
+                if _entry_is_folder(entry) is not False:
                     logger.warning("Leaving '{}' in the Proton Drive trash: can't confirm "
                                    "it's a plain file.".format(name))
                     continue
                 # Residual race: `delete /trash/<name>` re-resolves the name at
                 # delete time (first match wins), so an identically named item
-                # trashed by another client between the listing above and this
+                # trashed by another client between the probe above and this
                 # call could be the one deleted.  The CLI offers no
-                # uid-addressed delete, so this window can't be closed further.
-                await self.cli.delete("/trash/" + name, strict=True)
+                # uid-addressed delete, so this window can't be closed further —
+                # but delete's per-node results name the uid it acted on, so
+                # the race at least gets detected loudly after the fact.
+                delete_results = await self.cli.delete("/trash/" + name, strict=True)
+                deleted = {r.get("uid") for r in delete_results if r.get("ok") is True}
+                if deleted and deleted != {uid}:
+                    logger.error(
+                        "Permanently deleted a DIFFERENT same-named item named '{}' from "
+                        "the Proton Drive trash than intended (another client changed the "
+                        "trash mid-operation).  Review the Proton Drive trash.".format(name))
+                    continue
                 logger.debug("Permanently deleted '%s' from the Proton Drive trash", name)
             except Exception as e:
                 logger.warning("Couldn't permanently delete '{}' from the Proton Drive trash "
@@ -706,7 +714,12 @@ class ProtonSource(BackupDestination, Startable):
         try:
             with open(meta_local, "w", encoding="utf-8") as f:
                 json.dump(meta, f)
-            await self.cli.upload(meta_local, folder)
+            # create-new-revision, not the default "replace": in CLI 0.8.0
+            # "replace" moves the old same-named file to the TRASH (with no
+            # uid reported), so every rewrite would grow the trash with a
+            # sidecar the purge can never positively re-identify.  A new
+            # revision updates the node in place instead.
+            await self.cli.upload(meta_local, folder, conflict="create-new-revision")
             self._meta_cache[item.metadataPath()] = meta
             item._meta = meta
         finally:

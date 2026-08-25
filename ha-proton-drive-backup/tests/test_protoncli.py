@@ -366,6 +366,14 @@ async def test_upload_command_args(tmp_path):
     assert line == "filesystem upload -f replace -d skip /tmp/x.tar /my-files/HA"
 
 
+async def test_upload_new_revision_args(tmp_path):
+    binary = write_script(tmp_path, 'exit 0\n')
+    cli = make_cli(tmp_path, binary)
+    await cli.upload("/tmp/x.json", "/my-files/HA", conflict="create-new-revision")
+    line = args_log(tmp_path)[-1]
+    assert line == "filesystem upload -f create-new-revision -d skip /tmp/x.json /my-files/HA"
+
+
 async def test_download_command_args(tmp_path):
     binary = write_script(tmp_path, 'exit 0\n')
     cli = make_cli(tmp_path, binary)
@@ -466,6 +474,32 @@ async def test_delete_is_lenient_on_error(tmp_path):
     cli = make_cli(tmp_path, binary)
     # delete uses check=False, so a non-zero exit should not raise
     await cli.delete("/my-files/HA/x.tar")
+
+
+async def test_delete_command_args_and_results(tmp_path):
+    binary = write_script(tmp_path, 'echo "[{\\"uid\\": \\"abc\\", \\"ok\\": true}]"\n')
+    cli = make_cli(tmp_path, binary)
+    results = await cli.delete("/trash/x.tar", strict=True)
+    line = args_log(tmp_path)[-1]
+    assert line == "filesystem delete /trash/x.tar --json"
+    assert results == [{"uid": "abc", "ok": True}]
+
+
+async def test_delete_strict_fails_on_ok_false_result(tmp_path):
+    # Like trash, `delete` exits 0 even when a node's result is ok=false, so
+    # strict mode must catch the failure from the JSON results themselves.
+    binary = write_script(tmp_path, 'echo "[{\\"uid\\": \\"abc\\", \\"ok\\": false}]"\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.delete("/trash/x.tar", strict=True)
+
+
+async def test_delete_tolerates_unparseable_output(tmp_path):
+    # A CLI output-shape change must degrade to "no results" and trust the
+    # exit code, never fail the purge's delete outright.
+    binary = write_script(tmp_path, 'echo "deleted OK, no json here"\n')
+    cli = make_cli(tmp_path, binary)
+    assert await cli.delete("/trash/x.tar", strict=True) == []
 
 
 async def test_trash_command_args_and_results(tmp_path):

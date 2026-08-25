@@ -469,40 +469,62 @@ class ProtonCli:
         bare (non-unique) name.
         """
         result = await self._run(["filesystem", "trash", path, "--json"], check=strict)
-        parsed = _salvage_json(result.stdout.strip()) if result.stdout.strip() else None
-        if isinstance(parsed, dict):
-            # Salvage of a cluttered payload can recover a single result
-            # object instead of the array; keep an ok=false inside it visible
-            # to strict mode rather than discarding it as the wrong shape.
-            parsed = [parsed]
-        results = [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
+        results = _node_results(result.stdout)
         # The CLI exits 0 even when a node's trash result is ok=false (only
         # thrown errors set the exit code — per the CLI source, v0.8.0), so
         # strict mode must also inspect the results, not just the exit code.
         if strict:
-            failed = [r for r in results if r.get("ok") is False]
-            if failed:
-                raise ProtonError("proton-drive trash failed for '{}': {}".format(
-                    path, json.dumps(failed)[:500]), result.returncode)
-            if not results:
-                # Exit 0 with no parseable per-node results (output-shape
-                # drift): fall back to trusting the exit code, but say so —
-                # the ok=false channel is blind here.
-                logger.warning("proton-drive trash '%s' exited 0 but returned no "
-                               "parseable results; trusting the exit code", path)
+            _check_node_results("trash", path, results, result.returncode)
         return results
 
-    async def delete(self, path: str, strict: bool = False) -> None:
-        # NOTE: the CLI's `filesystem delete` only operates on items that are
-        # ALREADY in the trash, addressed as "/trash/<name>"; it errors on live
-        # paths.  It resolves <name> by scanning the whole trash and acts on
-        # the first match, so when several trashed items share the name the
-        # caller must rule out ambiguity first (see ProtonSource's purge).
-        await self._run(["filesystem", "delete", path], check=strict)
+    async def delete(self, path: str, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Permanently delete an item that is ALREADY in the trash, addressed as
+        "/trash/<name>"; the CLI errors on live paths.  It resolves <name> by
+        scanning the whole trash and acts on the first match, so the caller
+        must confirm which node the name denotes first (see ProtonSource's
+        purge).
+
+        Returns per-node {"uid", "ok"} results like trash(), and strict mode
+        likewise inspects them: `delete` shares trash's exit-0-on-ok=false
+        behavior (both stream SDK results without touching the exit code).
+        """
+        result = await self._run(["filesystem", "delete", path, "--json"], check=strict)
+        results = _node_results(result.stdout)
+        if strict:
+            _check_node_results("delete", path, results, result.returncode)
+        return results
 
 
 # Sentinel distinguishing "no JSON found" from a legitimately parsed None/null.
 _NO_JSON = object()
+
+
+def _node_results(stdout: str) -> List[Dict[str, Any]]:
+    """Parse a node command's --json stdout into its per-node result dicts."""
+    text = stdout.strip()
+    parsed = _salvage_json(text) if text else None
+    if isinstance(parsed, dict):
+        # Salvage of a cluttered payload can recover a single result object
+        # instead of the array; keep an ok=false inside it visible to strict
+        # mode rather than discarding it as the wrong shape.
+        parsed = [parsed]
+    return [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
+
+
+def _check_node_results(op: str, path: str, results: List[Dict[str, Any]],
+                        returncode: int) -> None:
+    """Strict-mode check of per-node results for an exit-0 command."""
+    failed = [r for r in results if r.get("ok") is False]
+    if failed:
+        raise ProtonError("proton-drive {} failed for '{}': {}".format(
+            op, path, json.dumps(failed)[:500]), returncode)
+    if not results:
+        # Exit 0 with no parseable per-node results (output-shape drift): fall
+        # back to trusting the exit code, but say so — the ok=false channel is
+        # blind here.
+        logger.warning("proton-drive %s '%s' exited 0 but returned no "
+                       "parseable results; trusting the exit code", op, path)
 
 
 def _salvage_json(text: str) -> Any:
