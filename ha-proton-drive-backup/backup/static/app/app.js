@@ -924,6 +924,7 @@
         { key: "enable_proton_upload", label: "Upload backups to Proton Drive", type: "bool", help: "When off, backups are only kept in Home Assistant." },
         { key: "proton_folder_name", label: "Proton folder path", type: "text", help: "Folder in your Proton Drive where backups are stored. Use / to nest folders, e.g. backups/ha." },
         { key: "delete_after_upload", label: "Delete from Home Assistant after upload", type: "bool", help: "Keep backups only in Proton Drive once uploaded." },
+        { key: "permanently_delete", label: "Permanently delete removed backups", type: "bool", help: "Also remove old backups from the Proton Drive trash, so they stop counting toward your storage quota. When off, removed backups pile up in the trash (using quota) until you empty it yourself." },
         { key: "upload_limit_bytes_per_second", label: "Upload speed limit", type: "text", advanced: true, placeholder: "e.g. 5 MB (empty = unlimited)", help: "Throttle uploads to Proton Drive, e.g. \"5 MB\" or \"500 KB\". Leave blank for unlimited." },
         { key: "proton_drive_timeout_seconds", label: "CLI timeout (seconds)", type: "number", min: 1, advanced: true, help: "How long to wait for proton-drive commands." },
         { key: "proton_transfer_timeout_seconds", label: "Transfer timeout (seconds)", type: "number", min: 1, advanced: true, help: "How long to wait for a single upload/download transfer." }

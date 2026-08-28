@@ -39,6 +39,17 @@ Once signed in, backups sync automatically.
 
 - `enable_proton_upload` (default `true`): upload backups to Proton Drive. When
   `false`, the app only manages backups inside Home Assistant.
+- `permanently_delete` (default `true`): when the app removes one of its own
+  backups from Proton Drive (retention or a manual delete), also delete it
+  from Proton Drive's trash. Trashed items keep counting toward your storage
+  quota and Proton never empties the trash on its own, so without this old
+  backups would silently eat your quota until you empty the trash yourself.
+  Set to `false` to keep removed backups recoverable in the trash instead.
+  Only the backup's own two files are ever purged this way — anything else the
+  app moves to the trash (e.g. leftovers from an interrupted upload) stays
+  recoverable there — and when the app can't positively re-identify the file
+  in the trash (say, a same-named item is already there) it errs on the side
+  of leaving it, so the trash can still grow a little in rare cases.
 - `proton_folder_name` (default `Home Assistant Backups`): the folder created
   under Proton Drive's `/my-files` root. May be a nested path separated by `/`
   (e.g. `backups/ha` creates `backups` and `ha` inside it); each missing level is
@@ -95,7 +106,8 @@ Each backup becomes two files in that folder:
 > its own.** The two files above always come as a pair, so a `.tar` or
 > `.metadata.json` sitting directly inside the folder without its partner is
 > treated as a leftover from an interrupted upload or delete, and is cleaned up
-> (moved to Proton Drive's **trash**, never permanently deleted). Point
+> (moved to Proton Drive's **trash**, never permanently deleted — even with
+> `permanently_delete` on). Point
 > `proton_folder_name` at a folder dedicated to these backups, not at one that
 > also holds your own files.
 >
