@@ -259,6 +259,73 @@ class Coordinator(Trigger):
         backup.addSource(created)
         self._updateFreshness()
 
+    def checkUploadToProton(self, slug):
+        """Pre-flight for a manual HA -> Proton upload.
+
+        The transfer itself runs as a fire-and-forget task whose failures are
+        only visible in the log, so everything that can be checked up front
+        must fail here, inside the request, where the UI can show it.
+        """
+        if self._busy:
+            raise PleaseWait()
+        if not self._model.dest.upload():
+            raise LogicError("Proton Drive uploads are disabled in the add-on's settings")
+        if not self._model.dest.enabled():
+            raise LogicError("Sign in to Proton Drive first")
+        self._checkProtonUploadPreconditions(slug)
+
+    def _checkProtonUploadPreconditions(self, slug) -> Backup:
+        backup = self._ensureBackup(self._model.source.name(), slug)
+        if backup.getSource(self._model.dest.name()) is not None:
+            raise LogicError("This backup is already in Proton Drive")
+        if not backup.getSource(self._model.source.name()).uploadable():
+            raise LogicError("Wait for Home Assistant to finish creating this backup")
+        return backup
+
+    async def uploadToProton(self, slug):
+        await self._withSoftLock(lambda: self._uploadToProton(slug))
+
+    async def _uploadToProton(self, slug):
+        self.clearCaches()
+        # Re-checked here (not just in checkUploadToProton) because a sync may
+        # have uploaded or deleted the backup between pre-flight and this task.
+        # An ignored backup is deliberately allowed: the automatic uploader
+        # skips those, but clicking upload on one is an explicit request.
+        backup = self._checkProtonUploadPreconditions(slug)
+        # A manual upload is an explicit "I want this one in Proton Drive", so
+        # pin it there — otherwise retention could rotate it right back out on
+        # the next sync (the automatic uploader refuses uploads that would be
+        # purged next; a manual one shouldn't silently vanish either).  The pin
+        # travels in the save options so the metadata sidecar is written
+        # retained=True in the same upload; a separate retain() call afterwards
+        # could fail and leave the copy unpinned while the UI reports success.
+        # The user can unpin it from the backup's menu.
+        prior_options = backup.getOptions()
+        prior_retain = prior_options.retain_sources if prior_options else None
+        options = prior_options
+        if options is None:
+            options = CreateOptions(backup.date(), "")
+            backup.setOptions(options)
+        # CreateOptions' retain_sources default is a shared dict — replace,
+        # never mutate in place.
+        retain = dict(options.retain_sources)
+        retain[self._model.dest.name()] = True
+        options.retain_sources = retain
+        try:
+            created = await self._model.dest.save(backup, await self._model.source.read(backup))
+        except BaseException:
+            # A failed (or cancelled) transfer must not leave the pin behind:
+            # the next automatic sync would upload this backup itself and bake
+            # retained=True into a copy the user never saw uploaded, exempting
+            # it from rotation with no UI trace.
+            if prior_options is None:
+                backup.setOptions(None)
+            else:
+                prior_options.retain_sources = prior_retain
+            raise
+        backup.addSource(created)
+        self._updateFreshness()
+
     async def startBackup(self, options: CreateOptions):
         return await self._withSoftLock(lambda: self._startBackup(options))
 

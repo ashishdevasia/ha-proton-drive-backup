@@ -60,7 +60,7 @@
   function base() {
     return {
       backups: baseBackups.map(function (b) { return JSON.parse(JSON.stringify(b)); }),
-      ha_url_base: "http://homeassistant.local:8123", restore_backup_path: "hassio/backups",
+      ha_url_base: "http://homeassistant.local:8123",
       ask_error_reports: false,
       next_backup_text: "in 2 days", next_backup_machine: "2026-06-30T02:00:00", next_backup_detail: "Mon Jun 30 02:00:00 2026",
       last_backup_text: "8 hours ago", last_backup_machine: "2026-06-28T02:51:38", last_backup_detail: "Sat Jun 28 02:51:38 2026",
@@ -232,6 +232,7 @@
         case "/cancelSync": scenario = "normal"; return ok({ message: "Cancelled (mock)" });
         case "/backup": return ok({ message: "Requested backup (mock)" });
         case "/upload": return ok({ message: "Uploading in background (mock)" });
+        case "/uploadToProton": return ok({ message: "Uploading to Proton Drive in background (mock)" });
         case "/deleteSnapshot": return ok({ message: "Deleted (mock)" });
         case "/retain": return ok({ message: "Updated (mock)" });
         case "/note": return ok({ message: "Note saved (mock)" });

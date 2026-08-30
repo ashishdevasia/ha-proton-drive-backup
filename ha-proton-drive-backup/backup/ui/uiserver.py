@@ -16,7 +16,7 @@ from injector import inject, singleton
 from backup.config import Config, Setting, CreateOptions, BoolValidator, Startable, VERSION, isStaging
 from backup.const import SOURCE_PROTON_DRIVE, SOURCE_HA, GITHUB_BUG_TEMPLATE, FOLDERS
 from backup.model import Coordinator, Backup, AbstractBackup
-from backup.exceptions import KnownError, ensureKey, PleaseWait
+from backup.exceptions import KnownError, LogicError, NoBackup, ensureKey, PleaseWait
 from backup.util import GlobalInfo, Estimator, DataCache
 from backup.file import File
 from backup.ha import HaSource, PendingBackup, BACKUP_NAME_KEYS, HaRequests, HaUpdater
@@ -71,6 +71,16 @@ class UiServer(Trigger, Startable):
         self._data_cache = data_cache
         self._haupdater = haupdater
         self._upload_event = asyncio.Event()
+        self._background_tasks = set()
+
+    def _spawn(self, coro, name=None):
+        # The event loop keeps only weak references to tasks; hold one until
+        # the task finishes so a fire-and-forget transfer can't be
+        # garbage-collected mid-flight.
+        task = asyncio.create_task(coro, name=name)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     def name(self):
         return "UI Server"
@@ -92,7 +102,6 @@ class UiServer(Trigger, Startable):
         status: Dict[Any, Any] = {}
         status['backups'] = [self.getBackupDetails(b) for b in self._coord.backups()]
         status['ha_url_base'] = self._ha_source.getHomeAssistantUrl()
-        status['restore_backup_path'] = "hassio/backups"
         next = self._coord.nextBackupTime()
         if next is None:
             status['next_backup_text'] = "Disabled"
@@ -333,7 +342,7 @@ class UiServer(Trigger, Startable):
 
     async def startSync(self, request) -> Any:
         self._coord.clearCaches()
-        asyncio.create_task(self._backgroundSync(), name="Sync from web request")
+        self._spawn(self._backgroundSync(), name="Sync from web request")
         await self._coord._sync_start.wait()
         return await self.getstatus(request)
 
@@ -444,13 +453,74 @@ class UiServer(Trigger, Startable):
     # --- Upload / Download / Logs ---------------------------------------------
 
     async def _doUpload(self, slug):
-        await self._coord.uploadBackups(slug)
+        try:
+            await self._coord.uploadBackups(slug)
+        except Exception as e:
+            # Fire-and-forget task: log now instead of an "exception was never
+            # retrieved" at GC time.
+            logger.printException(e)
         self._upload_event.set()
 
     async def upload(self, request: Request):
         slug = request.query.get("slug", "")
-        asyncio.create_task(self._doUpload(slug))
-        return web.json_response({'message': "Uploading backup in the background"})
+        self._spawn(self._doUpload(slug), name="Download to Home Assistant")
+        return web.json_response({'message': "Downloading backup to Home Assistant in the background"})
+
+    def _markBackupStatus(self, slug, message):
+        try:
+            self._coord.getBackup(slug).overrideStatus(message)
+        except Exception:
+            pass  # backup may be gone (deleted mid-transfer)
+
+    def _protonUploadStillWanted(self, slug):
+        """True if the backup still exists with an HA copy and no Proton copy.
+
+        Used to classify a NoBackup/LogicError from the upload task: when this
+        holds, the error can't have come from the precondition re-check finding
+        the situation resolved — the transfer genuinely didn't happen.
+        """
+        try:
+            backup = self._coord.getBackup(slug)
+        except Exception:
+            return False
+        return backup.getSource(SOURCE_HA) is not None and backup.getSource(SOURCE_PROTON_DRIVE) is None
+
+    async def _doUploadToProton(self, slug):
+        # This runs as a fire-and-forget task, so failures are logged (never
+        # raised into the void) and left as a visible trace on the backup's
+        # card — by the time an except clause runs, ProtonSource.save's
+        # finally has cleared the transient transfer status, so without this
+        # the progress bar would just vanish.
+        try:
+            await self._coord.uploadToProton(slug)
+        except PleaseWait as e:
+            # A sync took the lock between pre-flight and this task: no
+            # transfer was attempted, so don't claim one "failed".
+            logger.printException(e)
+            self._markBackupStatus(slug, "Upload to Proton Drive didn't start — try again")
+        except (NoBackup, LogicError) as e:
+            # Usually the in-task re-check found the situation already
+            # resolved (the backup is gone, or a racing sync uploaded it), and
+            # there's nothing truthful to mark — but LogicError is also raised
+            # by real transfer machinery (CLI list parsing, staging stream
+            # mismatches).  Tell them apart by the backup's state: if it still
+            # needs uploading, this was a genuine failure.
+            logger.printException(e)
+            if self._protonUploadStillWanted(slug):
+                self._markBackupStatus(slug, "Upload to Proton Drive failed")
+        except Exception as e:
+            logger.printException(e)
+            self._markBackupStatus(slug, "Upload to Proton Drive failed")
+        self._upload_event.set()
+
+    async def uploadToProton(self, request: Request):
+        slug = request.query.get("slug", "")
+        # Everything checkable up front fails here, through the normal error
+        # middleware, so the UI shows it (a sync in progress, a bad slug, a
+        # backup already in Proton).  Only the transfer itself is backgrounded.
+        self._coord.checkUploadToProton(slug)
+        self._spawn(self._doUploadToProton(slug), name="Upload to Proton Drive")
+        return web.json_response({'message': "Uploading backup to Proton Drive in the background"})
 
     async def download(self, request: Request):
         slug = request.query.get("slug", "")
@@ -580,7 +650,7 @@ class UiServer(Trigger, Startable):
                     self.sync, self.startSync, self.cancelSync,
                     self.getconfig, self.exposeserver, self.saveconfig,
                     self.confirmdelete, self.skipspacecheck, self.ignorestartupcooldown,
-                    self.upload, self.download, self.deleteSnapshot, self.retain, self.note,
+                    self.upload, self.uploadToProton, self.download, self.deleteSnapshot, self.retain, self.note,
                     self.ignore, self.makeanissue]
         # The debug endpoints can simulate errors and shift the add-on's clock
         # (which drives backup scheduling/retention).  They're test-only tooling,

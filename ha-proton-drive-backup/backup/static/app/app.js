@@ -232,7 +232,11 @@
                          //   tab switches / advanced toggle until save or reset
     tab: "dashboard",
     pendingLogin: false,
-    lastUploads: {},     // slug -> true (to detect upload completion)
+    lastUploads: {},     // slug -> destination title (to detect transfer completion)
+    pendingOutcome: {},  // slug -> destination title: transfer ended, copy not
+                         //   yet visible; wait one more poll before calling it
+                         //   failed (the backend attaches the copy just after
+                         //   clearing the transfer indicators)
     booted: false
   };
 
@@ -288,16 +292,34 @@
   function detectUploadCompletion(prev, s) {
     var nowUploading = {};
     (s.backups || []).forEach(function (b) {
-      if (b.upload_info && typeof b.upload_info.progress === "number") nowUploading[b.slug] = true;
+      if (b.upload_info && typeof b.upload_info.progress === "number") nowUploading[b.slug] = b.upload_info.name || "Proton Drive";
     });
+    function outcome(slug, dest) {
+      var key = dest === "Home Assistant" ? "HomeAssistant" : "ProtonDrive";
+      var b = (s.backups || []).filter(function (x) { return x.slug === slug; })[0];
+      if (!b) return "gone";
+      return (b.sources || []).some(function (x) { return x.key === key; }) ? "ok" : "missing";
+    }
+    function label(dest) { return dest === "Home Assistant" ? "Download to Home Assistant" : "Upload to " + dest; }
+    var nextPending = {};
     Object.keys(state.lastUploads).forEach(function (slug) {
-      if (!nowUploading[slug]) {
-        var b = (s.backups || []).filter(function (x) { return x.slug === slug; })[0];
-        if (b && b.sources && b.sources.some(function (x) { return x.key === "ProtonDrive"; })) {
-          toast("Upload to Proton Drive complete", "ok");
-        }
-      }
+      if (nowUploading[slug]) return;
+      var dest = state.lastUploads[slug];
+      var out = outcome(slug, dest);
+      if (out === "ok") toast(label(dest) + " complete", "ok");
+      // The HA direction clears its transfer indicators one supervisor call
+      // before the copy is attached, so "missing" right after the transfer
+      // can still be a success — give it one more poll before judging.
+      else if (out === "missing") nextPending[slug] = dest;
     });
+    Object.keys(state.pendingOutcome || {}).forEach(function (slug) {
+      if (nowUploading[slug] || nextPending[slug]) return; // transfer restarted
+      var dest = state.pendingOutcome[slug];
+      var out = outcome(slug, dest);
+      if (out === "ok") toast(label(dest) + " complete", "ok");
+      else if (out === "missing") toast(label(dest) + " didn't finish — check the add-on log", "bad");
+    });
+    state.pendingOutcome = nextPending;
     state.lastUploads = nowUploading;
   }
 
@@ -585,7 +607,11 @@
   // ---- Banners ----
   function activityTitle(s) {
     if ((s.backups || []).some(function (b) { return b.isPending; })) return "Creating a backup…";
-    if ((s.backups || []).some(isActive)) return "Uploading to Proton Drive";
+    var active = (s.backups || []).filter(isActive)[0];
+    if (active) {
+      var dest = (active.upload_info && active.upload_info.name) || "Proton Drive";
+      return dest === "Home Assistant" ? "Downloading to Home Assistant" : "Uploading to " + dest;
+    }
     return "Syncing with Proton Drive…";
   }
   function activityMessage(s) {
@@ -594,9 +620,13 @@
     var uploading = (s.backups || []).filter(isActive);
     if (uploading.length) {
       var b = uploading[0], up = b.upload_info, pct = clampPct(up.progress);
-      if (pct >= 100) return b.name + " — uploading to Proton Drive (large backups can take several minutes).";
+      var toHA = up.name === "Home Assistant";
+      if (pct >= 100) {
+        return toHA ? b.name + " — finishing download to Home Assistant."
+                    : b.name + " — uploading to " + (up.name || "Proton Drive") + " (large backups can take several minutes).";
+      }
       var sp = fmtSpeed(up.speed);
-      return b.name + " — preparing " + pct + "%" + (sp ? " · " + sp : "");
+      return b.name + " — " + (toHA ? "downloading " : "preparing ") + pct + "%" + (sp ? " · " + sp : "");
     }
     return "Checking backups and applying your retention rules.";
   }
@@ -779,6 +809,7 @@
   function uploadProgress(slug, up) {
     var pct = clampPct(up.progress);
     var dest = up.name || "Proton Drive";
+    var toHA = dest === "Home Assistant";
     // The backend can track the Home-Assistant -> local staging read (real
     // progress + speed), but the proton-drive CLI reports nothing while it
     // uploads the staged file. Once staging hits 100% we therefore show an
@@ -786,16 +817,16 @@
     // (total ÷ elapsed) "speed".
     if (pct >= 100) {
       return ce("div", { class: "upload", "data-upload-slug": slug }, [
-        ce("div", { class: "u-head" }, [ce("span", { text: "Uploading to " + dest + "…" }), ce("b", { html: '<span class="spinner-inline"></span>' })]),
+        ce("div", { class: "u-head" }, [ce("span", { text: (toHA ? "Finishing download to " : "Uploading to ") + dest + "…" }), ce("b", { html: '<span class="spinner-inline"></span>' })]),
         ce("div", { class: "bar indeterminate" }, [ce("i")]),
         ce("div", { class: "u-foot" }, [
           ce("span", { class: "u-total", text: fmtBytes(up.total) }),
-          ce("span", { text: "Large backups can take several minutes" })
+          ce("span", { text: toHA ? "Almost done" : "Large backups can take several minutes" })
         ])
       ]);
     }
     return ce("div", { class: "upload", "data-upload-slug": slug }, [
-      ce("div", { class: "u-head" }, [ce("span", { text: "Preparing for " + dest + "…" }), ce("b", { class: "u-pct", text: pct + "%" })]),
+      ce("div", { class: "u-head" }, [ce("span", { text: toHA ? "Downloading to Home Assistant…" : "Preparing for " + dest + "…" }), ce("b", { class: "u-pct", text: pct + "%" })]),
       ce("div", { class: "bar" }, [ce("i", { style: "width:" + pct + "%" })]),
       ce("div", { class: "u-foot" }, [
         ce("span", { class: "u-total", text: fmtBytes(up.total) }),
@@ -817,9 +848,15 @@
       row.appendChild(ce("button", { class: "btn ghost sm", onclick: function () { openRestore(b); } }, [iconNode("restore"), ce("span", { text: "Restore" })]));
     }
     if (b.uploadable) {
-      var ub = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackup(b); } }, [iconNode("upload"), ce("span", { text: "Upload to Proton" })]);
+      var ub = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackup(b); } }, [iconNode("download"), ce("span", { text: "Download to Home Assistant" })]);
       if (!state.status.proton_authenticated) { ub.setAttribute("disabled", ""); ub.title = "Sign in to Proton Drive first"; }
       row.appendChild(ub);
+    }
+    var inProton = (b.sources || []).some(function (s) { return s.key === "ProtonDrive"; });
+    if (b.restorable && !inProton && !isActive(b) && state.status.enable_proton_upload) {
+      var pb = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackupToProton(b); } }, [iconNode("upload"), ce("span", { text: "Upload to Proton Drive" })]);
+      if (!state.status.proton_authenticated) { pb.setAttribute("disabled", ""); pb.title = "Sign in to Proton Drive first"; }
+      row.appendChild(pb);
     }
     return row;
   }
@@ -887,7 +924,8 @@
     if (MOCK) { toast("Download started (mock)", "info"); return; }
     var a = ce("a", { href: href, download: "" }); document.body.appendChild(a); a.click(); a.remove();
   }
-  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug)), "Uploading to Proton Drive in the background"); }
+  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug)), "Downloading to Home Assistant in the background"); }
+  function uploadBackupToProton(b) { action(api("/uploadToProton?slug=" + encodeURIComponent(b.slug)), "Uploading to Proton Drive in the background"); }
   function toggleRetain(b, sourceKey, value) {
     var sources = {}; (b.sources || []).forEach(function (s) { sources[s.key] = !!s.retained; });
     sources[sourceKey] = value;
@@ -1462,7 +1500,15 @@
   // ---- Restore ----
   function openRestore(b) {
     var s = state.status || {};
-    var path = (s.ha_url_base || "") ;
+    // ha_url_base is a template like "https://{host}:8123/" — the backend
+    // doesn't know the address the user browses HA from, so fill in the
+    // current hostname and drop the trailing slash before appending a path.
+    // Per the URL spec location.hostname keeps an IPv6 address's brackets
+    // (e.g. "[::1]"); add them only if an engine ever returns it bare, since
+    // the template appends ":<port>".
+    var host = location.hostname;
+    if (host.indexOf(":") !== -1 && host.charAt(0) !== "[") host = "[" + host + "]";
+    var haBase = (s.ha_url_base || "").replace("{host}", host).replace(/\/+$/, "");
     var body = [
       ce("p", { class: "dim", text: "Home Assistant restores backups from its own Settings screen. This backup is available in Home Assistant and ready to restore." }),
       ce("div", { class: "banner info", style: "margin:0" }, [
@@ -1477,7 +1523,7 @@
       ce("button", { class: "btn ghost", text: "Close", onclick: closeModal }),
       ce("button", { class: "btn", onclick: function () { downloadBackup(b); } }, [iconNode("download"), ce("span", { text: "Download backup" })])
     ];
-    if (s.ha_url_base) foot.unshift(ce("a", { class: "btn subtle", href: s.ha_url_base + "/config/backup/list", target: "_blank", rel: "noopener", text: "Open HA backups" }));
+    if (haBase) foot.unshift(ce("a", { class: "btn subtle", href: haBase + "/config/backup/backups", target: "_blank", rel: "noopener", text: "Open HA backups" }));
     openModal(modal("Restore backup", "restore", body, foot));
   }
 

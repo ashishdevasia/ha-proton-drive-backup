@@ -1,9 +1,10 @@
-## v0.2.0 [2026-08-24]
+## v0.2.0 [2026-08-31]
 
 - `proton_folder_name` can now be a nested path, e.g. `backups/ha`; missing folder levels are created automatically.
 - Updated the bundled Proton Drive CLI from 0.6.0 to 0.8.0
 - New `permanently_delete` option (default `true`): backups removed from Proton Drive are also deleted from its
   trash, so they stop counting toward the storage quota.
+- Bug-fixes
 
 **Breaking:** a `/` in `proton_folder_name` used to mean a dash-joined folder name (`backups/ha` → `backups-ha`); 
   it now means a nested path — the old folder is left untouched but its backups are no longer visible to the app.
