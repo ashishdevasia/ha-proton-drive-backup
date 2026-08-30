@@ -60,7 +60,7 @@
   function base() {
     return {
       backups: baseBackups.map(function (b) { return JSON.parse(JSON.stringify(b)); }),
-      ha_url_base: "http://homeassistant.local:8123", restore_backup_path: "hassio/backups",
+      ha_url_base: "http://homeassistant.local:8123",
       ask_error_reports: false,
       next_backup_text: "in 2 days", next_backup_machine: "2026-06-30T02:00:00", next_backup_detail: "Mon Jun 30 02:00:00 2026",
       last_backup_text: "8 hours ago", last_backup_machine: "2026-06-28T02:51:38", last_backup_detail: "Sat Jun 28 02:51:38 2026",
@@ -188,7 +188,7 @@
             days_between_backups: 3, backup_time_of_day: "02:00", max_backups_in_ha: 4, max_backups_in_proton_drive: 4,
             backup_name: "Full Backup {year}-{month}-{day} {hr24}:{min}:{sec}", backup_password: "",
             delete_before_new_backup: false, call_backup_snapshot: false,
-            enable_proton_upload: true, proton_folder_name: "Home Assistant Backups", delete_after_upload: false,
+            enable_proton_upload: true, proton_folder_name: "Home Assistant Backups", delete_after_upload: false, permanently_delete: true,
             upload_limit_bytes_per_second: "", proton_drive_timeout_seconds: 120, proton_transfer_timeout_seconds: 3600,
             exclude_folders: "", exclude_addons: "", exclude_ha_database: false,
             generational_days: 0, generational_weeks: 0, generational_months: 0, generational_years: 0,
@@ -232,6 +232,7 @@
         case "/cancelSync": scenario = "normal"; return ok({ message: "Cancelled (mock)" });
         case "/backup": return ok({ message: "Requested backup (mock)" });
         case "/upload": return ok({ message: "Uploading in background (mock)" });
+        case "/uploadToProton": return ok({ message: "Uploading to Proton Drive in background (mock)" });
         case "/deleteSnapshot": return ok({ message: "Deleted (mock)" });
         case "/retain": return ok({ message: "Updated (mock)" });
         case "/note": return ok({ message: "Note saved (mock)" });

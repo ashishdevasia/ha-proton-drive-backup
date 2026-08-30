@@ -39,11 +39,12 @@ class FakeProtonCli:
         self._authenticated = authenticated
         self._auth_warning = None
         self.files = {}            # remote_path -> bytes
-        self.trashed = {}          # remote_path -> bytes (moved to trash)
+        self.trashed = []          # trash entries: {"name", "uid", "data"}
         self.folders = set()       # known folder paths
         self.calls = []            # list of (op, *args)
         self.download_count = 0
         self.upload_count = 0
+        self._uid_counter = 0
 
     # -- auth -------------------------------------------------------------------
     def isAuthenticated(self):
@@ -69,18 +70,41 @@ class FakeProtonCli:
     async def info(self, path):
         self.calls.append(("info", path))
         self._require_auth()
+        if path.startswith("/trash/"):
+            # Like the real CLI, a trash path resolves by scanning the trash
+            # and returning the FIRST node with that name (the same resolver
+            # `filesystem delete` uses).
+            name = path[len("/trash/"):]
+            for entry in self.trashed:
+                if entry["name"] == name:
+                    return {"name": {"ok": True, "value": entry["name"]},
+                            "uid": entry["uid"], "type": entry.get("type", "file"),
+                            "size": len(entry["data"])}
+            raise ProtonError("Trashed node not found", 1)
         if path in self.folders or path in self.files:
             return {"name": os.path.basename(path)}
         raise ProtonError("not found: " + path, 1)
 
     async def createFolder(self, parent_path, name):
         self.calls.append(("createFolder", parent_path, name))
+        self._require_auth()
+        # Like the real CLI, creating a folder inside a non-existent parent
+        # fails; this is what catches walk-order bugs in nested creation.
+        if parent_path != "/my-files" and parent_path not in self.folders:
+            raise ProtonError("folder not found: " + parent_path, 1)
         self.folders.add(parent_path + "/" + name)
         return {"name": name}
 
     async def listFolder(self, path):
         self.calls.append(("listFolder", path))
         self._require_auth()
+        # "/trash" is a top-level section listing all trashed nodes, like the
+        # real CLI — including its {"ok", "value"} wrapper around the (E2EE)
+        # name.
+        if path == "/trash":
+            return [{"name": {"ok": True, "value": t["name"]}, "uid": t["uid"],
+                     "type": t.get("type", "file"), "size": len(t["data"])}
+                    for t in self.trashed]
         # The root is always listable; a non-existent sub-folder errors, like the
         # real CLI.
         if path != "/my-files" and path not in self.folders:
@@ -89,7 +113,8 @@ class FakeProtonCli:
         prefix = path.rstrip("/") + "/"
         for remote, data in self.files.items():
             if remote.startswith(prefix) and "/" not in remote[len(prefix):]:
-                entries.append({"name": os.path.basename(remote), "size": len(data)})
+                entries.append({"name": os.path.basename(remote), "size": len(data),
+                                "type": "file"})
         for folder in self.folders:
             if folder.startswith(prefix) and "/" not in folder[len(prefix):]:
                 entries.append({"name": os.path.basename(folder), "type": "folder"})
@@ -98,11 +123,26 @@ class FakeProtonCli:
     async def upload(self, local_path, parent_path, conflict="replace"):
         self.upload_count += 1
         self.calls.append(("upload", local_path, parent_path, conflict))
+        # Like the real CLI, uploading into a non-existent folder fails.
+        if parent_path.rstrip("/") != "/my-files" and parent_path.rstrip("/") not in self.folders:
+            raise ProtonError("folder not found: " + parent_path, 1)
         with open(local_path, "rb") as f:
             data = f.read()
-        self.files[parent_path.rstrip("/") + "/" + os.path.basename(local_path)] = data
+        remote = parent_path.rstrip("/") + "/" + os.path.basename(local_path)
+        if remote in self.files:
+            # Mirror the real CLI's file-conflict handling (v0.8.0): identical
+            # content is always skipped (before any strategy applies);
+            # otherwise "replace" moves the old file to the TRASH, while
+            # "create-new-revision" updates the node in place.
+            if self.files[remote] == data:
+                return
+            if conflict == "replace":
+                self.trashed.append({"name": os.path.basename(remote),
+                                     "uid": self._next_uid(),
+                                     "data": self.files[remote]})
+        self.files[remote] = data
 
-    async def download(self, remote_path, local_folder, conflict="replace"):
+    async def download(self, remote_path, local_folder, conflict="remove"):
         self.download_count += 1
         self.calls.append(("download", remote_path, local_folder, conflict))
         if remote_path not in self.files:
@@ -113,27 +153,54 @@ class FakeProtonCli:
 
     async def trash(self, path, strict=False):
         # Moves an item out of its folder into the trash (so listFolder no longer
-        # shows it), mirroring `proton-drive filesystem trash`.
+        # shows it) and returns the CLI's per-node {"uid", "ok"} results,
+        # mirroring `proton-drive filesystem trash --json`.
         self.calls.append(("trash", path))
         if getattr(self, "trash_should_fail", False) and strict:
             raise ProtonError("trash failed: " + path, 1)
         if path in self.files:
-            self.trashed[path] = self.files.pop(path)
+            uid = self._next_uid()
+            self.trashed.append({"name": os.path.basename(path), "uid": uid,
+                                 "data": self.files.pop(path)})
+            return [{"uid": uid, "ok": True}]
+        if strict:
+            # Like the real CLI, a strict trash of a non-existent item errors.
+            raise ProtonError("not found: " + path, 1)
+        return []
 
     async def delete(self, path, strict=False):
-        # The real CLI permanently deletes ONLY trashed items.
+        # The real CLI permanently deletes ONLY trashed items, addressed as
+        # "/trash/<name>" and resolved by name (first match wins); it errors on
+        # any other path.  Returns per-node {"uid", "ok"} results, mirroring
+        # `proton-drive filesystem delete --json`.
         self.calls.append(("delete", path))
-        if path not in self.trashed:
+        if not path.startswith("/trash/"):
             if strict:
-                raise ProtonError("delete on live item: " + path, 1)
-            return
-        self.trashed.pop(path, None)
+                raise ProtonError("You can permanently delete items only from trash", 1)
+            return []
+        name = path[len("/trash/"):]
+        for i, entry in enumerate(self.trashed):
+            if entry["name"] == name:
+                del self.trashed[i]
+                return [{"uid": entry["uid"], "ok": True}]
+        if strict:
+            raise ProtonError("Trashed node not found", 1)
+        return []
+
+    def _next_uid(self):
+        self._uid_counter += 1
+        return "uid-{}".format(self._uid_counter)
 
     # -- test helpers -----------------------------------------------------------
     def seed_backup(self, folder, slug, meta_bytes, tar_bytes=b"tarcontents"):
         self.folders.add(folder)
         self.files[folder + "/" + slug + TAR_SUFFIX] = tar_bytes
         self.files[folder + "/" + slug + METADATA_SUFFIX] = meta_bytes
+
+    def seed_trash(self, name, data=b"trashcontents", type="file"):
+        # Plants a pre-existing trashed item (e.g. one the user trashed).
+        self.trashed.append({"name": name, "uid": self._next_uid(), "data": data,
+                             "type": type})
 
 
 class FakeInfo:

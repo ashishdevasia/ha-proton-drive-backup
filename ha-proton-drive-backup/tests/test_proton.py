@@ -7,7 +7,7 @@ import pytest
 from backup.config import Config, Setting
 from backup.proton import ProtonCli
 from backup.proton.protoncli import _as_entry_list
-from backup.proton.protonsource import _entry_name, _entry_size
+from backup.proton.protonsource import _entry_name, _entry_size, _entry_is_folder
 from backup.proton.exceptions import ProtonNotAuthenticated, ProtonCliMissing
 from backup.model.protonbackup import ProtonBackup, TAR_SUFFIX, METADATA_SUFFIX
 from backup.const import (NECESSARY_PROP_KEY_SLUG, NECESSARY_PROP_KEY_DATE,
@@ -54,9 +54,20 @@ def test_entry_name_and_size_real_proton_shape():
     }
     assert _entry_name(file_node) == "e2e0001.tar"
     assert _entry_size(file_node) == 18  # claimedSize, not the encrypted 96
+    assert _entry_is_folder(file_node) is False
 
     folder_node = {"name": {"ok": True, "value": "Home Assistant Backups"}, "type": "folder"}
     assert _entry_name(folder_node) == "Home Assistant Backups"
+    assert _entry_is_folder(folder_node) is True
+
+    # An entry that doesn't say its type is "unknown", not file or folder, so
+    # callers can decide how to degrade on a CLI output-shape change.
+    assert _entry_is_folder({"name": "x"}) is None
+
+    # If a future CLI wraps type in the same result object it uses for name,
+    # it must still be understood (the sweeps fail closed on unknown types).
+    assert _entry_is_folder({"type": {"ok": True, "value": "folder"}}) is True
+    assert _entry_is_folder({"type": {"ok": True, "value": "file"}}) is False
 
     # A name that couldn't be decrypted should be skipped, not crash.
     assert _entry_name({"name": {"ok": False, "error": "x"}}) is None

@@ -189,7 +189,7 @@ class ProtonCli:
     def _healCorruptEventsLock(self, env: Dict[str, str]) -> bool:
         """
         Delete events.lock iff it exists but isn't parseable JSON — the one
-        lock state the CLI (verified v0.4.6-v0.6.0) can't recover from: its
+        lock state the CLI (verified v0.4.6-v0.8.0) can't recover from: its
         init tolerates only ENOENT and heals parseable stale locks itself.
         Returns True if the file was deleted.
         """
@@ -221,27 +221,10 @@ class ProtonCli:
         text = result.stdout.strip()
         if not text:
             return None
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            pass
-        # Some CLI builds prefix the payload with log lines (which may themselves
-        # contain stray brackets).  Try parsing from each candidate start, and
-        # prefer a whole trailing line that is itself valid JSON.
-        for line in reversed(text.splitlines()):
-            line = line.strip()
-            if line[:1] in ("[", "{"):
-                try:
-                    return json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-        for i, ch in enumerate(text):
-            if ch in "[{":
-                try:
-                    return json.loads(text[i:])
-                except json.JSONDecodeError:
-                    continue
-        raise ProtonError("Could not parse CLI JSON output: " + text[:200], result.returncode)
+        parsed = _salvage_json(text)
+        if parsed is _NO_JSON:
+            raise ProtonError("Could not parse CLI JSON output: " + text[:200], result.returncode)
+        return parsed
 
     # --- High level operations -------------------------------------------------
 
@@ -462,27 +445,128 @@ class ProtonCli:
 
     async def upload(self, local_path: str, parent_path: str,
                      conflict: str = "replace") -> None:
-        await self._run(["filesystem", "upload", "-c", conflict, local_path, parent_path],
+        await self._run(["filesystem", "upload", "-f", conflict, "-d", "skip",
+                         local_path, parent_path],
                         timeout=self.config.get(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS))
 
     async def download(self, remote_path: str, local_folder: str,
-                       conflict: str = "replace") -> None:
-        await self._run(["filesystem", "download", "-c", conflict, remote_path, local_folder],
+                       conflict: str = "remove") -> None:
+        await self._run(["filesystem", "download", "-f", conflict, "-d", "skip",
+                         remote_path, local_folder],
                         timeout=self.config.get(Setting.PROTON_TRANSFER_TIMEOUT_SECONDS))
 
-    async def trash(self, path: str, strict: bool = False) -> None:
-        # Moves an item to the Proton Drive trash, which removes it from its
-        # folder (so it stops showing up in listings) without a permanent,
-        # irreversible delete.  This is how the addon "deletes" backups.
-        # strict=True propagates CLI failures so callers can keep local state in
-        # sync with the remote; strict=False is best-effort (used for cleanup).
-        await self._run(["filesystem", "trash", path], check=strict)
+    async def trash(self, path: str, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Move an item to the Proton Drive trash, which removes it from its
+        folder (so it stops showing up in listings) without a permanent,
+        irreversible delete.  strict=True propagates CLI failures so callers
+        can keep local state in sync with the remote; strict=False is
+        best-effort (used for cleanup).
 
-    async def delete(self, path: str, strict: bool = False) -> None:
-        # NOTE: the CLI's `filesystem delete` only operates on items that are
-        # ALREADY in the trash; it errors on live paths.  The addon uses trash()
-        # for removal, so this permanent delete is provided for completeness.
-        await self._run(["filesystem", "delete", path], check=strict)
+        Returns the CLI's per-node results ({"uid": ..., "ok": ...}; [] when
+        unavailable) so callers know exactly which node was trashed — needed
+        to safely purge it from the trash, where the CLI addresses nodes by
+        bare (non-unique) name.
+        """
+        result = await self._run(["filesystem", "trash", path, "--json"], check=strict)
+        results = _node_results(result.stdout)
+        # The CLI exits 0 even when a node's trash result is ok=false (only
+        # thrown errors set the exit code — per the CLI source, v0.8.0), so
+        # strict mode must also inspect the results, not just the exit code.
+        if strict:
+            _check_node_results("trash", path, results, result.returncode)
+        return results
+
+    async def delete(self, path: str, strict: bool = False) -> List[Dict[str, Any]]:
+        """
+        Permanently delete an item that is ALREADY in the trash, addressed as
+        "/trash/<name>"; the CLI errors on live paths.  It resolves <name> by
+        scanning the whole trash and acts on the first match, so the caller
+        must confirm which node the name denotes first (see ProtonSource's
+        purge).
+
+        Returns per-node {"uid", "ok"} results like trash(), and strict mode
+        likewise inspects them: `delete` shares trash's exit-0-on-ok=false
+        behavior (both stream SDK results without touching the exit code).
+        """
+        result = await self._run(["filesystem", "delete", path, "--json"], check=strict)
+        results = _node_results(result.stdout)
+        if strict:
+            _check_node_results("delete", path, results, result.returncode)
+        return results
+
+
+# Sentinel distinguishing "no JSON found" from a legitimately parsed None/null.
+_NO_JSON = object()
+
+
+def _node_results(stdout: str) -> List[Dict[str, Any]]:
+    """Parse a node command's --json stdout into its per-node result dicts."""
+    text = stdout.strip()
+    parsed = _salvage_json(text) if text else None
+    if isinstance(parsed, dict):
+        # Salvage of a cluttered payload can recover a single result object
+        # instead of the array; keep an ok=false inside it visible to strict
+        # mode rather than discarding it as the wrong shape.
+        parsed = [parsed]
+    return [e for e in parsed if isinstance(e, dict)] if isinstance(parsed, list) else []
+
+
+def _check_node_results(op: str, path: str, results: List[Dict[str, Any]],
+                        returncode: int) -> None:
+    """Strict-mode check of per-node results for an exit-0 command."""
+    failed = [r for r in results if r.get("ok") is False]
+    if failed:
+        raise ProtonError("proton-drive {} failed for '{}': {}".format(
+            op, path, json.dumps(failed)[:500]), returncode)
+    if not results:
+        # Exit 0 with no parseable per-node results (output-shape drift): fall
+        # back to trusting the exit code, but say so — the ok=false channel is
+        # blind here.
+        logger.warning("proton-drive %s '%s' exited 0 but returned no "
+                       "parseable results; trusting the exit code", op, path)
+
+
+def _salvage_json(text: str) -> Any:
+    """Parse CLI stdout as JSON; returns _NO_JSON when no parse succeeds."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # Some CLI builds surround the payload with log lines (which may
+    # themselves contain stray brackets).  The payload can be a MULTI-LINE
+    # streaming array ("[", one item per line, "]"), so first try each
+    # line-START bracket as the payload's beginning, running to the end of the
+    # output.  Restricting candidates to line starts keeps JSON embedded at
+    # the tail of a log line from beating the real payload, while a stray
+    # bracket candidate simply fails to parse (json.loads demands the whole
+    # remainder) and the scan moves on.
+    offset = 0
+    for line in text.splitlines(keepends=True):
+        stripped = line.lstrip()
+        if stripped[:1] in ("[", "{"):
+            try:
+                return json.loads(text[offset + len(line) - len(stripped):])
+            except json.JSONDecodeError:
+                pass
+        offset += len(line)
+    # Then a whole line that is itself valid JSON (a single-line payload with
+    # log lines before and/or after it).
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if line[:1] in ("[", "{"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    # Last resort: any bracket anywhere in the text.
+    for i, ch in enumerate(text):
+        if ch in "[{":
+            try:
+                return json.loads(text[i:])
+            except json.JSONDecodeError:
+                continue
+    return _NO_JSON
 
 
 def _as_entry_list(data: Any) -> List[Dict[str, Any]]:

@@ -31,6 +31,214 @@ async def test_background_sync_swallows_other_errors():
     await ui._backgroundSync()  # logged, not raised
 
 
+async def test_upload_to_proton_task_passes_slug_and_signals():
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+
+    class Coord:
+        def __init__(self):
+            self.slug = None
+
+        async def uploadToProton(self, slug):
+            self.slug = slug
+    ui._coord = Coord()
+
+    await ui._doUploadToProton("abc123")
+    assert ui._coord.slug == "abc123"
+    assert ui._upload_event.is_set()
+
+
+async def test_upload_to_proton_task_swallows_errors():
+    # Fire-and-forget task: a mid-transfer failure must be logged, not raised
+    # as an unretrieved task exception.
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+
+    class Backup:
+        def overrideStatus(self, fmt, *args):
+            pass
+
+    class Coord:
+        def __init__(self):
+            self.called = False
+
+        async def uploadToProton(self, slug):
+            self.called = True
+            raise PleaseWait()
+
+        def getBackup(self, slug):
+            return Backup()
+    ui._coord = Coord()
+
+    await ui._doUploadToProton("abc123")  # must complete without raising
+    assert ui._coord.called is True
+    assert ui._upload_event.is_set()
+
+
+async def test_upload_to_proton_task_marks_backup_on_failure():
+    # A mid-transfer failure must leave a visible trace on the card:
+    # ProtonSource.save's finally clears the transient status, so the task
+    # sets an override afterwards.
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+
+    class Backup:
+        def __init__(self):
+            self.status = None
+
+        def overrideStatus(self, fmt, *args):
+            self.status = fmt
+    backup = Backup()
+
+    class Coord:
+        async def uploadToProton(self, slug):
+            raise RuntimeError("boom")
+
+        def getBackup(self, slug):
+            return backup
+    ui._coord = Coord()
+
+    await ui._doUploadToProton("abc123")
+    assert backup.status == "Upload to Proton Drive failed"
+    assert ui._upload_event.is_set()
+
+
+def _status_ui(error, sources=("HomeAssistant",), backup_exists=True):
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+
+    class Backup:
+        def __init__(self):
+            self.status = None
+
+        def overrideStatus(self, fmt, *args):
+            self.status = fmt
+
+        def getSource(self, name):
+            return object() if name in sources else None
+
+    class Coord:
+        def __init__(self):
+            self.backup = Backup()
+
+        async def uploadToProton(self, slug):
+            raise error
+
+        def getBackup(self, slug):
+            from backup.exceptions import NoBackup
+            if not backup_exists:
+                raise NoBackup()
+            return self.backup
+    ui._coord = Coord()
+    return ui
+
+
+async def test_upload_to_proton_pleasewait_marks_didnt_start():
+    # A sync stealing the lock before the task runs means no transfer was
+    # attempted — the card must not claim one "failed".
+    ui = _status_ui(PleaseWait())
+    await ui._doUploadToProton("abc123")
+    assert ui._coord.backup.status == "Upload to Proton Drive didn't start — try again"
+
+
+async def test_upload_to_proton_resolved_race_leaves_no_status():
+    # The in-task re-check finding the backup already in Proton (a racing
+    # sync uploaded it) is a resolved situation, not a failure.
+    from backup.exceptions import LogicError
+    ui = _status_ui(LogicError("This backup is already in Proton Drive"),
+                    sources=("HomeAssistant", "ProtonDrive"))
+    await ui._doUploadToProton("abc123")
+    assert ui._coord.backup.status is None
+
+
+async def test_upload_to_proton_midtransfer_logicerror_marks_failed():
+    # LogicError isn't only raised by the precondition re-check — the CLI's
+    # list parser and the staging stream raise it too.  When the backup is
+    # still HA-only, the transfer genuinely failed and the card must say so.
+    from backup.exceptions import LogicError
+    ui = _status_ui(LogicError("Unexpected CLI list output"), sources=("HomeAssistant",))
+    await ui._doUploadToProton("abc123")
+    assert ui._coord.backup.status == "Upload to Proton Drive failed"
+
+
+async def test_upload_to_proton_nobackup_after_delete_is_quiet():
+    # Backup deleted mid-flight: NoBackup from the task, and the backup can't
+    # be marked because it no longer exists — must complete without raising.
+    from backup.exceptions import NoBackup
+    ui = _status_ui(NoBackup(), backup_exists=False)
+    await ui._doUploadToProton("abc123")
+    assert ui._upload_event.is_set()
+
+
+async def test_download_to_ha_task_swallows_errors():
+    # The older /upload task gets the same hygiene: a failure is logged, not
+    # left as an unretrieved task exception.
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+
+    class Coord:
+        def __init__(self):
+            self.called = False
+
+        async def uploadBackups(self, slug):
+            self.called = True
+            raise PleaseWait()
+    ui._coord = Coord()
+
+    await ui._doUpload("abc123")  # must complete without raising
+    assert ui._coord.called is True
+    assert ui._upload_event.is_set()
+
+
+class _Request:
+    def __init__(self, **query):
+        self.query = query
+
+
+async def test_upload_to_proton_handler_fails_fast_on_preflight():
+    # Pre-flight errors must escape the handler (into the error middleware the
+    # UI understands) instead of dying inside a background task.
+    ui = UiServer.__new__(UiServer)
+
+    class Coord:
+        def checkUploadToProton(self, slug):
+            raise PleaseWait()
+    ui._coord = Coord()
+
+    with pytest.raises(PleaseWait):
+        await ui.uploadToProton(_Request(slug="abc123"))
+
+
+async def test_upload_to_proton_handler_backgrounds_after_preflight():
+    import asyncio
+    ui = UiServer.__new__(UiServer)
+    ui._upload_event = asyncio.Event()
+    ui._background_tasks = set()
+
+    class Coord:
+        def __init__(self):
+            self.checked = None
+            self.uploaded = None
+
+        def checkUploadToProton(self, slug):
+            self.checked = slug
+
+        async def uploadToProton(self, slug):
+            self.uploaded = slug
+    ui._coord = Coord()
+
+    resp = await ui.uploadToProton(_Request(slug="abc123"))
+    assert ui._coord.checked == "abc123"
+    assert json.loads(resp.text)["message"]
+    await ui._upload_event.wait()  # background task ran to completion
+    assert ui._coord.uploaded == "abc123"
+
+
 def make_logout_ui(proton):
     ui = UiServer.__new__(UiServer)
 

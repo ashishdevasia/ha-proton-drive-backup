@@ -60,7 +60,7 @@ The options mirror the original app. The Proton-specific ones are:
 |---|---|---|
 | `max_backups_in_proton_drive` | `4` | How many backups to keep in Proton Drive. |
 | `enable_proton_upload` | `true` | Upload backups to Proton Drive. |
-| `proton_folder_name` | `Home Assistant Backups` | Folder created under `/my-files`. |
+| `proton_folder_name` | `Home Assistant Backups` | Folder created under `/my-files`. Use `/` to nest, e.g. `backups/ha`. The app manages this folder, so give it one of its own. |
 | `proton_cli_path` | `/usr/bin/proton-drive` | Path to the bundled CLI binary. |
 | `proton_data_path` | `/data/proton` | Where the CLI session/keyring/temp live. |
 | `proton_drive_timeout_seconds` | `180` | Timeout for metadata/list operations. |

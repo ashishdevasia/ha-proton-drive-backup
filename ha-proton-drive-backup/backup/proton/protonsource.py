@@ -5,7 +5,7 @@ import shutil
 import tempfile
 import time
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from injector import inject, singleton
 
@@ -48,12 +48,30 @@ class ProtonSource(BackupDestination, Startable):
         self.cli = cli
         self._info = info
         self._uploading = False
+        # Counts save() starts.  get() compares it across its own run so the
+        # orphan-tar sweep can tell an upload began mid-sync even if it also
+        # finished (and cleared _uploading) before the sweep looked.
+        self._upload_starts = 0
+        self._warned_typeless_listing = False
         self._account = None
         self._meta_cache: Dict[str, Dict] = {}
-        self._folder_ensured = False
+        # The folder path that has been verified/created on Proton Drive.  Kept
+        # as the resolved path (not a bool) so a runtime change of
+        # PROTON_FOLDER_NAME automatically invalidates it.
+        self._ensured_path: Optional[str] = None
         self._folder_lock = asyncio.Lock()
 
     async def start(self):
+        # Make the changed "/" semantics visible to migrating users: before
+        # nested-path support, separators were collapsed into dashes, so this
+        # setting used to point at a different (single, dash-joined) folder.
+        raw = self.config.get(Setting.PROTON_FOLDER_NAME) or ""
+        if ("/" in raw or "\\" in raw) and len(self.folderSegments()) > 1:
+            logger.warning("proton_folder_name contains a path separator; backups "
+                           "will be stored in the nested folder '{}'.  Older addon "
+                           "versions used a single dash-joined folder instead — "
+                           "backups in that folder are left untouched but are no "
+                           "longer visible to the addon.".format(self.folderName()))
         # Establish whether we already have a usable Proton session so the very
         # first sync knows if the destination is configured.
         try:
@@ -77,7 +95,7 @@ class ProtonSource(BackupDestination, Startable):
         except ProtonNotAuthenticated:
             pass  # already signed out
         # Drop per-account state in case the next sign-in is a different account.
-        self._folder_ensured = False
+        self._ensured_path = None
         self._meta_cache.clear()
         self._account = None
 
@@ -122,54 +140,102 @@ class ProtonSource(BackupDestination, Startable):
 
     # --- Folder management -----------------------------------------------------
 
+    def folderSegments(self) -> List[str]:
+        raw = self.config.get(Setting.PROTON_FOLDER_NAME) or ""
+        segments = []
+        # "/" (and "\") nest folders: "backups/ha" resolves to the "ha" folder
+        # inside "backups" under the drive root.
+        for segment in raw.replace("\\", "/").split("/"):
+            # A leading "-" would be parsed by the CLI as a flag, since each
+            # segment is handed to `create-folder` as a positional argv token
+            # (the CLI is invoked via exec, not a shell, so this is the only
+            # injection vector).  Strip to a fixpoint: removing dashes can
+            # expose more whitespace and vice versa ("- -rf" must not survive
+            # as "-rf").
+            segment = segment.strip()
+            while segment.startswith("-"):
+                segment = segment.lstrip("-").strip()
+            # A segment made entirely of dots ("." / ".." / ...) would make the
+            # path escape toward (or past) the drive root; empty segments would
+            # collapse ("a//b").  Drop both rather than erroring, keeping the
+            # setting's sanitize-silently behavior.
+            if not segment or set(segment) == {"."}:
+                continue
+            segments.append(segment)
+        return segments or ["Home Assistant Backups"]
+
     def folderName(self) -> str:
-        name = (self.config.get(Setting.PROTON_FOLDER_NAME) or "").strip()
-        # A "/" in the name would make the CLI treat it as nested paths and would
-        # never match the single-segment listing in _ensureFolder, so collapse
-        # path separators to keep this a single folder under the root.
-        name = name.replace("/", "-").replace("\\", "-")
-        # A leading "-" would be parsed by the CLI as a flag, since the folder
-        # name is handed to `create-folder` as a positional argv token (the CLI
-        # is invoked via exec, not a shell, so this is the only injection vector).
-        # Strip leading dashes/whitespace so the name can't become an option.
-        name = name.lstrip("-").strip()
-        # Once "/" and "\" are collapsed, the only remaining traversal tokens are
-        # a name made entirely of dots ("." / ".." / ...), which would make
-        # folderPath() resolve to the drive root or its parent.  Reject those.
-        if name and set(name) == {"."}:
-            name = ""
-        return name or "Home Assistant Backups"
+        return "/".join(self.folderSegments())
 
     def folderPath(self) -> str:
         return PROTON_ROOT + "/" + self.folderName()
 
-    async def _ensureFolder(self):
-        if self._folder_ensured:
-            return
-        # Serialize so two concurrent callers can't both create the folder
+    async def _ensureFolder(self) -> str:
+        # Returns the ensured path.  Callers must use the return value rather
+        # than re-deriving it from config, which may have changed in between.
+        target = self.folderPath()
+        if self._ensured_path == target:
+            return target
+        # Serialize so two concurrent callers can't both create a folder
         # (Proton allows duplicate names, which would split backups across two
         # folders and break retention counting).  Double-checked inside the lock.
         async with self._folder_lock:
-            if self._folder_ensured:
-                return
-            # List the root and reuse an existing folder by name.  We deliberately
-            # do NOT create on a generic error (transient/auth/timeout all
-            # propagate), because a blind create on a transient failure would
-            # split backups across two folders.
-            if self.folderName() not in await self._rootFolderNames():
-                logger.info("Creating Proton Drive backup folder '{}'".format(self.folderName()))
-                try:
-                    await self.cli.createFolder(PROTON_ROOT, self.folderName())
-                except ProtonError:
-                    # Verify by re-listing instead of parsing the error text:
-                    # a concurrent writer may have created it since we listed.
-                    if self.folderName() not in await self._rootFolderNames():
-                        raise
-                    logger.info("Folder '{}' already exists, reusing it".format(self.folderName()))
-            self._folder_ensured = True
+            # Re-read the config inside the lock so the walked segments and the
+            # latched path always come from the same value, even if the setting
+            # changed while we waited for the lock.
+            segments = self.folderSegments()
+            target = PROTON_ROOT + "/" + "/".join(segments)
+            if self._ensured_path == target:
+                return target
+            current = PROTON_ROOT
+            for segment in segments:
+                current = await self._ensureChildFolder(current, segment)
+            self._ensured_path = current
+            return current
 
-    async def _rootFolderNames(self):
-        return {_entry_name(e) for e in await self.cli.listFolder(PROTON_ROOT)}
+    async def _ensureChildFolder(self, parent: str, name: str) -> str:
+        path = parent + "/" + name
+        # List the parent and reuse an existing folder by name.  We deliberately
+        # do NOT create on a generic list error (transient/auth/timeout all
+        # propagate), because a blind create on a transient failure would
+        # split backups across two folders.
+        entry = (await self._folderEntries(parent)).get(name)
+        if entry is None:
+            logger.info("Creating Proton Drive backup folder '{}'".format(path))
+            try:
+                await self.cli.createFolder(parent, name)
+                return path
+            except ProtonError:
+                # Verify by re-listing instead of parsing the error text:
+                # a concurrent writer may have created it since we listed.
+                entry = (await self._folderEntries(parent)).get(name)
+                if entry is None:
+                    raise
+                logger.info("Folder '{}' already exists, reusing it".format(path))
+        if _entry_is_folder(entry) is False:
+            # Never touch the conflicting file, and never create a duplicate
+            # folder next to it (Proton allows duplicate names, which would be
+            # ambiguous forever after).
+            raise ProtonError(
+                "'{}' already exists in Proton Drive as a file, so it can't be "
+                "used as part of the backup folder path.  Choose a different "
+                "proton_folder_name.".format(path))
+        return path
+
+    async def _folderEntries(self, path: str) -> Dict[str, Dict]:
+        entries = {}
+        for entry in await self.cli.listFolder(path):
+            name = _entry_name(entry)
+            if name is None:
+                continue
+            # Proton allows duplicate names.  Keep the most folder-like entry
+            # (folder > unknown > file) so a same-named file can't shadow the
+            # addon's own backup folder in the walk, and so delete()'s
+            # ambiguity check sees the folder.
+            existing = entries.get(name)
+            if existing is None or _folder_rank(entry) >= _folder_rank(existing):
+                entries[name] = entry
+        return entries
 
     # --- Reading the current state ---------------------------------------------
 
@@ -177,9 +243,16 @@ class ProtonSource(BackupDestination, Startable):
         logger.info("Proton get(): checking authentication")
         await self.cli.checkAuth()
         logger.info("Proton get(): ensuring backup folder exists")
-        await self._ensureFolder()
-        folder = self.folderPath()
+        folder = await self._ensureFolder()
         logger.info("Proton get(): listing '%s'", folder)
+        # Latched before the listing: an unpaired tar seen while an upload was
+        # in flight may be that upload's tar, whose sidecar can land (and the
+        # flag clear) between any later re-list and the sweep.  The start
+        # counter additionally catches an upload that both began and finished
+        # while this get() was running.  Either signal skips tar sweeping for
+        # this whole sync.
+        uploading_at_listing = self._uploading
+        upload_starts_at_listing = self._upload_starts
         try:
             entries = await self.cli.listFolder(folder)
         except (ProtonNotAuthenticated, ProtonTimeout):
@@ -188,8 +261,8 @@ class ProtonSource(BackupDestination, Startable):
             # The folder may have been removed out from under us since we last
             # confirmed it.  Re-resolve (recreating it if needed) and retry once
             # rather than failing the whole sync.
-            self._folder_ensured = False
-            await self._ensureFolder()
+            self._ensured_path = None
+            folder = await self._ensureFolder()
             entries = await self.cli.listFolder(folder)
 
         tars = {}
@@ -198,10 +271,35 @@ class ProtonSource(BackupDestination, Startable):
             entry_name = _entry_name(entry)
             if entry_name is None:
                 continue
+            if _entry_is_folder(entry):
+                # Sub-folders are never backups and must never be swept below:
+                # trashing a folder-typed entry (even one *named* like a tar)
+                # would trash its entire contents.
+                logger.debug("Proton get(): ignoring sub-folder '%s'", entry_name)
+                continue
+            if "/" in entry_name or "\\" in entry_name:
+                # os.path.basename() can't strip backslashes on Linux, so a "\"
+                # can only come from outside the addon and could smuggle a path
+                # separator into a later trash/download.  Never touch such an
+                # entry.  ("/" can't actually survive basename(); it's checked
+                # only as defense in depth.)
+                logger.warning("Proton get(): ignoring entry with path-like name '%s'", entry_name)
+                continue
             if entry_name.endswith(METADATA_SUFFIX):
                 meta_files.add(entry_name)
             elif entry_name.endswith(TAR_SUFFIX):
                 tars[entry_name] = entry
+
+        if entries and not self._warned_typeless_listing and \
+                all(_entry_is_folder(e) is None for e in entries):
+            # Every destructive path fails closed without type information, so
+            # deletion, retention pruning, and orphan cleanup are all disabled.
+            # Make that state loud instead of leaving only per-operation errors.
+            self._warned_typeless_listing = True
+            logger.warning("The Proton Drive CLI listing reported no entry types; "
+                           "deletion, retention cleanup, and orphan cleanup are "
+                           "disabled until this is resolved (a CLI update may have "
+                           "changed its output format)")
 
         logger.info("Proton get(): folder has %d entries (%d tar, %d metadata)",
                     len(entries), len(tars), len(meta_files))
@@ -227,42 +325,90 @@ class ProtonSource(BackupDestination, Startable):
             backups[backup.slug()] = backup
 
         # Drop cache entries for backups that no longer exist.
-        live = {slug + METADATA_SUFFIX for slug in (b.slug() for b in backups.values())}
+        live = {b.metadataPath() for b in backups.values()}
         for cached in list(self._meta_cache.keys()):
             if cached not in live:
                 self._meta_cache.pop(cached, None)
 
+        tar_slugs = {name[:-len(TAR_SUFFIX)] for name in tars}
+        orphan_metas = [m for m in meta_files if m[:-len(METADATA_SUFFIX)] not in tar_slugs]
+        if orphan_tars and (uploading_at_listing
+                            or self._upload_starts != upload_starts_at_listing):
+            logger.info("Skipping Proton orphan-tar cleanup this sync: an upload "
+                        "was in progress when the folder was listed, or started since")
+            sweep_tars = []
+        else:
+            sweep_tars = list(orphan_tars)
+        unsweepable = set()
+        if orphan_metas or sweep_tars:
+            # The listing above can be minutes old by now (one sidecar download
+            # per backup happened since), so re-list right before trashing.
+            # Two things can have changed under us: a name can gain a
+            # folder-typed duplicate at any time (which `trash`, resolving its
+            # path argument by name, might pick), and a concurrent save() that
+            # completed in the meantime pairs its tar — sweeping from the stale
+            # listing would trash a live backup.  Without a fresh listing,
+            # sweep nothing.
+            try:
+                fresh = await self.cli.listFolder(folder)
+            except Exception as e:
+                logger.warning("Skipping Proton orphan cleanup this sync (couldn't "
+                               "re-list '{}'): {}".format(folder, e))
+                orphan_metas, sweep_tars = [], []
+            else:
+                unsweepable = _unsweepable_names(fresh)
+                fresh_names = {n for n in (_entry_name(e) for e in fresh) if n is not None}
+                # Sweep only what is still present and unpaired in BOTH listings.
+                orphan_metas = [m for m in orphan_metas if m in fresh_names and
+                                m[:-len(METADATA_SUFFIX)] + TAR_SUFFIX not in fresh_names]
+                sweep_tars = [t for t in sweep_tars if t in fresh_names and
+                              t[:-len(TAR_SUFFIX)] + METADATA_SUFFIX not in fresh_names]
+
         # Best-effort: trash metadata sidecars whose tar is gone (e.g. a metadata
         # trash failed during a previous delete).  Otherwise they'd leak quota
         # forever, since get() would never iterate them again to retry.
-        tar_slugs = {name[:-len(TAR_SUFFIX)] for name in tars}
-        for meta_name in meta_files:
-            if meta_name[:-len(METADATA_SUFFIX)] not in tar_slugs:
-                try:
-                    await self.cli.trash(folder + "/" + meta_name)
-                    self._meta_cache.pop(meta_name, None)
-                except Exception as e:
-                    logger.debug("Couldn't clean up orphaned metadata '{}': {}".format(meta_name, e))
+        for meta_name in orphan_metas:
+            if meta_name in unsweepable:
+                logger.warning("Leaving Proton entry '{}' alone (can't confirm "
+                               "it's a plain file)".format(meta_name))
+                continue
+            try:
+                await self._trashInFolder(folder, meta_name)
+                self._meta_cache.pop(folder + "/" + meta_name, None)
+            except Exception as e:
+                logger.debug("Couldn't clean up orphaned metadata '{}': {}".format(meta_name, e))
 
         # Best-effort: trash tars with no metadata sidecar.  These are left behind
         # when save() is interrupted (process killed) after the tar upload but
         # before the metadata upload — they're invisible to retention (never
         # parsed into a ProtonBackup) so nothing else would ever reap them, and
-        # they'd leak quota forever.  Skip while an upload is in flight, since
-        # that tar may simply be one whose sidecar hasn't been written yet.
-        if orphan_tars and not self._uploading:
-            for tar_name in orphan_tars:
-                try:
-                    await self.cli.trash(folder + "/" + tar_name)
-                    logger.info("Removed orphaned Proton tar '{}' (no metadata sidecar)".format(tar_name))
-                except Exception as e:
-                    logger.debug("Couldn't clean up orphaned tar '{}': {}".format(tar_name, e))
+        # they'd leak quota forever.
+        for tar_name in sweep_tars:
+            if self._uploading or self._upload_starts != upload_starts_at_listing:
+                # An upload is in flight (or ran to completion since we listed);
+                # an unpaired tar may simply be one whose sidecar hasn't been
+                # written — or was written after our listing snapshots.
+                logger.info("Skipping Proton orphan-tar cleanup: an upload is in progress")
+                break
+            if tar_name in unsweepable:
+                logger.warning("Leaving Proton entry '{}' alone (can't confirm "
+                               "it's a plain file)".format(tar_name))
+                continue
+            try:
+                await self._trashInFolder(folder, tar_name)
+                logger.info("Removed orphaned Proton tar '{}' (no metadata sidecar)".format(tar_name))
+            except Exception as e:
+                logger.debug("Couldn't clean up orphaned tar '{}': {}".format(tar_name, e))
         logger.info("Proton get(): done, %d backup(s) present in Proton Drive", len(backups))
         return backups
 
     async def _loadMetadata(self, folder: str, meta_name: str, slug: str) -> Optional[Dict]:
-        if meta_name in self._meta_cache:
-            return self._meta_cache[meta_name]
+        # Cache by full path, not filename: after a folder change, a same-slug
+        # backup in the new folder must not be served the old folder's sidecar
+        # (its retained flag could wrongly expose it to retention pruning).
+        cache_key = folder + "/" + meta_name
+        if cache_key in self._meta_cache:
+            return self._meta_cache[cache_key]
         tmpdir = tempfile.mkdtemp(dir=self._tempDir())
         try:
             await self.cli.download(folder + "/" + meta_name, tmpdir)
@@ -275,7 +421,7 @@ class ProtonSource(BackupDestination, Startable):
                     local = os.path.join(tmpdir, files[0])
             with open(local, "r", encoding="utf-8") as f:
                 meta = json.load(f)
-            self._meta_cache[meta_name] = meta
+            self._meta_cache[cache_key] = meta
             return meta
         except ProtonNotAuthenticated:
             raise
@@ -290,21 +436,53 @@ class ProtonSource(BackupDestination, Startable):
     async def delete(self, backup: Backup):
         item = self._validate(backup)
         logger.info("Deleting '{}' from Proton Drive".format(item.name()))
+        # `trash` resolves its path argument by name, and Proton allows
+        # duplicate names: if a *folder* shares the tar's (or sidecar's) name,
+        # the CLI could resolve the path to the folder and trash its whole
+        # contents.  Re-list and refuse rather than gamble on resolution order
+        # (_folderEntries keeps the most folder-like duplicate, so one lookup
+        # per name suffices).
+        entries = await self._folderEntries(item.folderPath())
+        for name in (item.remoteName(), item.metadataName()):
+            entry = entries.get(name)
+            if entry is None:
+                continue
+            is_folder = _entry_is_folder(entry)
+            if is_folder:
+                raise ProtonError(
+                    "Refusing to delete '{}': a folder named '{}' exists in "
+                    "'{}', and deleting by that name could trash the folder "
+                    "instead.  Rename or remove it in Proton Drive to let "
+                    "deletion (and retention cleanup) proceed.".format(
+                        item.name(), name, item.folderPath()))
+            if is_folder is None:
+                raise ProtonError(
+                    "Refusing to delete '{}': the Proton Drive CLI listing "
+                    "didn't report a type for '{}' in '{}', so it can't be "
+                    "confirmed to be the backup's file.  This can happen when "
+                    "a CLI update changes its output format.".format(
+                        item.name(), name, item.folderPath()))
         # Trash (not permanent-delete): the CLI's `delete` only works on items
         # already in the trash, whereas `trash` moves a live item out of the
         # backup folder so it stops appearing in listings and retention
         # converges.  Trash the tar strictly: if it fails we must NOT drop the
         # local source, else the backup reappears next sync.  Metadata is
         # best-effort.
-        await self.cli.trash(item.tarPath(), strict=True)
-        await self.cli.trash(item.metadataPath())
-        self._meta_cache.pop(item.metadataName(), None)
+        tar_results = await self._trashInFolder(item.folderPath(), item.remoteName(), strict=True)
+        meta_results = await self._trashInFolder(item.folderPath(), item.metadataName())
+        # Purge only what delete() itself just removed — two validated backup
+        # files the addon owns.  The orphan sweeps deliberately stay
+        # move-to-trash-only, so a user file that merely LOOKS like a leftover
+        # is never permanently destroyed.
+        if self.config.get(Setting.PERMANENTLY_DELETE):
+            await self._purgeFromTrash([(item.remoteName(), tar_results),
+                                        (item.metadataName(), meta_results)])
+        self._meta_cache.pop(item.metadataPath(), None)
         backup.removeSource(self.name())
 
     async def save(self, backup: Backup, source) -> ProtonBackup:
         await self.cli.checkAuth()
-        await self._ensureFolder()
-        folder = self.folderPath()
+        folder = await self._ensureFolder()
         slug = backup.slug()
         retain = bool(backup.getOptions() and backup.getOptions().retain_sources.get(self.name(), False))
 
@@ -314,6 +492,7 @@ class ProtonSource(BackupDestination, Startable):
         tar_local = os.path.join(tmpdir, slug + TAR_SUFFIX)
         meta_local = os.path.join(tmpdir, slug + METADATA_SUFFIX)
         self._uploading = True
+        self._upload_starts += 1
         tar_uploaded = False
         succeeded = False
         try:
@@ -350,7 +529,7 @@ class ProtonSource(BackupDestination, Startable):
                 json.dump(meta, f)
             await self.cli.upload(meta_local, folder)
 
-            self._meta_cache[slug + METADATA_SUFFIX] = meta
+            self._meta_cache[folder + "/" + slug + METADATA_SUFFIX] = meta
             uploaded_size = os.path.getsize(tar_local)
             logger.info("Finished uploading '{}' to Proton Drive".format(backup.name()))
             succeeded = True
@@ -382,10 +561,110 @@ class ProtonSource(BackupDestination, Startable):
         # so we don't leave an unusable orphan consuming quota.
         if not tar_uploaded:
             return
+        name = slug + TAR_SUFFIX
         try:
-            await self.cli.trash(folder + "/" + slug + TAR_SUFFIX)
+            # Like delete(): `trash` resolves its path argument by name and
+            # Proton allows duplicate names, so confirm the name denotes a
+            # plain file first — a same-named folder must never be the casualty
+            # of a failed upload's rollback.  A skipped orphan is reaped later
+            # by get()'s (equally guarded) sweep.
+            entry = (await self._folderEntries(folder)).get(name)
+            if entry is None:
+                # The tar never actually landed (or the listing lags behind);
+                # there's nothing to clean up.
+                logger.debug("No orphaned tar '{}' found to clean up".format(name))
+                return
+            if _entry_is_folder(entry) is not False:
+                logger.warning("Leaving Proton entry '{}' alone (can't confirm "
+                               "it's a plain file)".format(name))
+                return
+            await self._trashInFolder(folder, name)
         except Exception as e:
             logger.warning("Couldn't clean up orphaned Proton tar for '{}': {}".format(slug, e))
+
+    async def _trashInFolder(self, folder: str, name: str, strict: bool = False) -> List[Dict]:
+        # Defense in depth for every removal: what's trashed must be a plain
+        # file name directly inside the backup folder — a separator in the name
+        # would let the trash reach outside it.
+        if "/" in name or "\\" in name:
+            if strict:
+                raise ProtonError("Refusing to trash Proton entry with a path-like name '{}'".format(name))
+            logger.warning("Refusing to trash Proton entry with a path-like name '{}'".format(name))
+            return []
+        return await self.cli.trash(folder + "/" + name, strict=strict)
+
+    async def _purgeFromTrash(self, items: List) -> None:
+        """
+        Permanently delete just-trashed backup files ((name, trash results)
+        pairs) so removed backups don't pile up in the Proton trash, where
+        they'd keep counting toward the storage quota forever (Proton never
+        empties the trash on its own).
+
+        Only delete() calls this — on its two validated backup files — NEVER
+        the orphan sweeps: a user file that merely looks like a leftover stays
+        recoverable in the trash no matter what.
+
+        Best-effort by design: the removal itself already succeeded (the items
+        left the backup folder), so every guard below degrades to the old
+        leave-it-in-the-trash behavior rather than failing the caller.
+        """
+        for name, trash_results in items:
+            try:
+                # Act only on a positively confirmed trash result: exactly one
+                # node, ok=true, with a uid.  Anything else (trash failed,
+                # output shape changed) leaves nothing safe to match on.
+                uids = {r.get("uid") for r in trash_results
+                        if r.get("ok") is True and isinstance(r.get("uid"), str)}
+                if len(uids) != 1:
+                    logger.debug("Not purging '%s' from the Proton trash: no confirmed trash result", name)
+                    continue
+                uid = next(iter(uids))
+                # `delete /trash/<name>` resolves the name by scanning the
+                # trash and acting on the FIRST match, and `info /trash/<name>`
+                # uses the very same resolver (verified in the CLI source,
+                # v0.8.0, both via getTrashedNode; its entity carries the same
+                # plain-string uid that `trash --json` reports).  So probe
+                # which node the name denotes right now, and delete only when
+                # it's exactly the node just trashed: a same-named item the
+                # *user* trashed must never be the one permanently deleted.
+                # Probing also beats listing the whole trash — it stops at the
+                # first match instead of streaming every trashed node on every
+                # delete.  If the contract drifts, the guards fail safe (skip
+                # the purge, keep the item in the trash).
+                entry = await self.cli.info("/trash/" + name)
+                if entry.get("uid") != uid:
+                    logger.warning(
+                        "Leaving '{}' in the Proton Drive trash: its name doesn't resolve "
+                        "to the item that was just trashed.".format(name))
+                    continue
+                # Like the sweeps, never permanently delete anything that can't
+                # be confirmed to be a plain file: if the name-resolved trash()
+                # ever took a same-named folder (the race the pre-trash
+                # listings guard against), leaving it recoverable in the trash
+                # caps the damage.
+                if _entry_is_folder(entry) is not False:
+                    logger.warning("Leaving '{}' in the Proton Drive trash: can't confirm "
+                                   "it's a plain file.".format(name))
+                    continue
+                # Residual race: `delete /trash/<name>` re-resolves the name at
+                # delete time (first match wins), so an identically named item
+                # trashed by another client between the probe above and this
+                # call could be the one deleted.  The CLI offers no
+                # uid-addressed delete, so this window can't be closed further —
+                # but delete's per-node results name the uid it acted on, so
+                # the race at least gets detected loudly after the fact.
+                delete_results = await self.cli.delete("/trash/" + name, strict=True)
+                deleted = {r.get("uid") for r in delete_results if r.get("ok") is True}
+                if deleted and deleted != {uid}:
+                    logger.error(
+                        "Permanently deleted a DIFFERENT same-named item named '{}' from "
+                        "the Proton Drive trash than intended (another client changed the "
+                        "trash mid-operation).  Review the Proton Drive trash.".format(name))
+                    continue
+                logger.debug("Permanently deleted '%s' from the Proton Drive trash", name)
+            except Exception as e:
+                logger.warning("Couldn't permanently delete '{}' from the Proton Drive trash "
+                               "(it stays in the trash): {}".format(name, e))
 
     async def read(self, backup: Backup) -> LocalFileStream:
         item = self._validate(backup)
@@ -426,14 +705,22 @@ class ProtonSource(BackupDestination, Startable):
         item.setNote(note)
 
     async def _rewriteMetadata(self, item: ProtonBackup, meta: Dict):
-        folder = self.folderPath()
+        # Upload next to the backup's own tar, not the currently-configured
+        # folder: after a proton_folder_name change these differ, and uploading
+        # to the new folder would split the tar and its sidecar across folders.
+        folder = item.folderPath()
         tmpdir = tempfile.mkdtemp(dir=self._tempDir())
         meta_local = os.path.join(tmpdir, item.metadataName())
         try:
             with open(meta_local, "w", encoding="utf-8") as f:
                 json.dump(meta, f)
-            await self.cli.upload(meta_local, folder)
-            self._meta_cache[item.metadataName()] = meta
+            # create-new-revision, not the default "replace": in CLI 0.8.0
+            # "replace" moves the old same-named file to the TRASH (with no
+            # uid reported), so every rewrite would grow the trash with a
+            # sidecar the purge can never positively re-identify.  A new
+            # revision updates the node in place instead.
+            await self.cli.upload(meta_local, folder, conflict="create-new-revision")
+            self._meta_cache[item.metadataPath()] = meta
             item._meta = meta
         finally:
             _rmtree(tmpdir)
@@ -517,6 +804,45 @@ def _entry_name(entry: Dict) -> Optional[str]:
         if isinstance(value, str) and value:
             return os.path.basename(value)
     return None
+
+
+def _entry_is_folder(entry: Dict) -> Optional[bool]:
+    # Real CLI listings carry a "type" field ("file"/"folder").  Returns None
+    # when the entry doesn't say, so callers can decide how to degrade on a CLI
+    # output-shape change: the folder walk falls back to name-only matching,
+    # while the orphan sweeps fail closed (never trash an unknown type).
+    entry_type = entry.get("type")
+    # Tolerate the {"ok": ..., "value": ...} result wrapper the CLI already
+    # uses for the (E2EE) name field, in case type gets wrapped the same way.
+    if isinstance(entry_type, dict):
+        entry_type = entry_type.get("value")
+    if isinstance(entry_type, str) and entry_type:
+        return entry_type.lower() in ("folder", "dir", "directory")
+    return None
+
+
+def _unsweepable_names(entries: List[Dict]) -> set:
+    # Names that can't be confirmed to denote a plain file: the entry is
+    # folder-typed, or its type is unknown.  Proton allows duplicate names, so
+    # any one such entry poisons the name for `trash` (which resolves its path
+    # argument by name) — trashing it could take a folder and all its contents.
+    names = set()
+    for entry in entries:
+        name = _entry_name(entry)
+        if name is not None and _entry_is_folder(entry) is not False:
+            names.add(name)
+    return names
+
+
+def _folder_rank(entry: Dict) -> int:
+    # Orders duplicate-name listing entries by how folder-like they are, so
+    # ambiguity-sensitive callers always see the most dangerous interpretation.
+    is_folder = _entry_is_folder(entry)
+    if is_folder:
+        return 2
+    if is_folder is None:
+        return 1
+    return 0
 
 
 def _entry_size(entry: Dict) -> int:

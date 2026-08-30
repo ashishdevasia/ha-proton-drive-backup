@@ -145,6 +145,7 @@ class Setting(Enum):
     PROTON_DATA_PATH = "proton_data_path"
     PROTON_DRIVE_TIMEOUT_SECONDS = "proton_drive_timeout_seconds"
     PROTON_TRANSFER_TIMEOUT_SECONDS = "proton_transfer_timeout_seconds"
+    PERMANENTLY_DELETE = "permanently_delete"
 
     # Old, deprecated settings
     DEPRECTAED_MAX_BACKUPS_IN_HA = "max_snapshots_in_hassio"
@@ -183,6 +184,10 @@ _DEFAULTS = {
     Setting.PROTON_DATA_PATH: "/data/proton",
     Setting.PROTON_DRIVE_TIMEOUT_SECONDS: 180,
     Setting.PROTON_TRANSFER_TIMEOUT_SECONDS: 3600,
+    # Trashed items still count toward the Proton storage quota, so removed
+    # backups are purged from the trash by default; turning this off restores
+    # the old move-to-trash-only behavior (recoverable, but quota grows).
+    Setting.PERMANENTLY_DELETE: True,
     Setting.MAX_BACKUPS_IN_HA: 4,
     Setting.MAX_BACKUPS_IN_GOOGLE_DRIVE: 4,
     Setting.DAYS_BETWEEN_BACKUPS: 3,
@@ -478,6 +483,7 @@ _CONFIG = {
     Setting.PROTON_DATA_PATH: "str?",
     Setting.PROTON_DRIVE_TIMEOUT_SECONDS: "float(1,)?",
     Setting.PROTON_TRANSFER_TIMEOUT_SECONDS: "float(1,)?",
+    Setting.PERMANENTLY_DELETE: "bool?",
 
     Setting.UPLOAD_LIMIT_BYTES_PER_SECOND: "float(0,)?",
 }

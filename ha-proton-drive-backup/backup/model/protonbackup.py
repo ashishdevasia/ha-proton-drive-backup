@@ -56,6 +56,9 @@ class ProtonBackup(AbstractBackup):
     def remoteName(self) -> str:
         return self._remote_name
 
+    def folderPath(self) -> str:
+        return self._folder_path
+
     def tarPath(self) -> str:
         return self._folder_path + "/" + self._remote_name
 

@@ -1,6 +1,6 @@
 {
   "name": "Home Assistant Proton Drive Backup",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "slug": "hassio_proton_drive_backup",
   "description": "Automatically manage backups between Home Assistant and Proton Drive",
   "arch": ["aarch64", "amd64"],
@@ -69,6 +69,7 @@
     "proton_data_path": "str?",
     "proton_drive_timeout_seconds": "float(1,)?",
     "proton_transfer_timeout_seconds": "float(1,)?",
+    "permanently_delete": "bool?",
     "delete_ignored_after_days": "float(0,)?",
     "call_backup_snapshot": "bool?",
 
