@@ -469,7 +469,15 @@ class ProtonSource(BackupDestination, Startable):
         # local source, else the backup reappears next sync.  Metadata is
         # best-effort.
         tar_results = await self._trashInFolder(item.folderPath(), item.remoteName(), strict=True)
-        meta_results = await self._trashInFolder(item.folderPath(), item.metadataName())
+        try:
+            meta_results = await self._trashInFolder(item.folderPath(), item.metadataName())
+        except Exception as e:
+            # The tar is already trashed; failing here must not resurrect the
+            # backup or skip removeSource().  The orphan-metadata sweep in
+            # get() retries the sidecar later.
+            logger.warning("Couldn't trash metadata for '{}' (will be swept "
+                           "later): {}".format(item.name(), e))
+            meta_results = []
         # Purge only what delete() itself just removed — two validated backup
         # files the addon owns.  The orphan sweeps deliberately stay
         # move-to-trash-only, so a user file that merely LOOKS like a leftover

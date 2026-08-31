@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import time
 from typing import Any, Dict, List, Optional
 
@@ -52,6 +53,25 @@ def _classify_failure(stderr: str):
     if any(line.removeprefix("error: ") in NETWORK_ERROR_MESSAGES for line in lines):
         return ProtonConnectionError
     return None
+
+
+def _signal_message(returncode: int) -> str:
+    """Describe a negative returncode (process killed by a signal)."""
+    signum = -returncode
+    try:
+        name = signal.Signals(signum).name
+    except ValueError:
+        name = "unknown signal"
+    message = "proton-drive was killed by signal {} ({}).".format(signum, name)
+    if signum == signal.SIGILL:
+        message += (" This usually means the proton-drive binary needs CPU "
+                    "instructions this machine doesn't provide (or that a "
+                    "hypervisor CPU model like x86-64-v2 masks).")
+    return message
+
+
+def _is_signal_death(e: BaseException) -> bool:
+    return isinstance(e, ProtonError) and (e.data().get("returncode") or 0) < 0
 
 
 @singleton
@@ -118,10 +138,27 @@ class ProtonCli:
         result = await self._execOnce(cmd, cmd_str, effective_timeout, started, env)
         # An unparseable events.lock crashes every CLI run at init (even `auth
         # login`) until it's deleted; verify the file itself, don't match text.
-        if (result.returncode != 0 and _classify_failure(result.stderr) is None
+        # Only for real CLI errors (rc > 0): a signal death isn't the lock.
+        if (result.returncode > 0 and _classify_failure(result.stderr) is None
                 and self._healCorruptEventsLock(env)):
             result = await self._execOnce(cmd, cmd_str, effective_timeout,
                                           time.monotonic(), env)
+
+        # A negative returncode means the process was killed by a signal — it
+        # never produced an answer, so no caller (not even check=False ones)
+        # may interpret the empty output as one.  Raised as its own class of
+        # failure so e.g. a SIGILL from a too-new binary isn't misreported as
+        # an authentication problem.
+        if result.returncode < 0:
+            message = _signal_message(result.returncode)
+            # e.g. Bun's crash report; the only field clue besides the signal.
+            # Scrubbed of ANSI/control characters: it flows into the UI warning.
+            stderr_tail = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", result.stderr)
+            stderr_tail = "".join(
+                ch for ch in stderr_tail if ch.isprintable() or ch == "\n").strip()
+            if stderr_tail:
+                message += " CLI stderr: " + stderr_tail[-200:]
+            raise ProtonError(message, result.returncode)
 
         # Classify only failed commands, and only from stderr: stdout carries
         # the JSON payload (user-controlled names) and must never be matched.
@@ -251,11 +288,20 @@ class ProtonCli:
             raise
         except (ProtonTimeout, ProtonConnectionError) as e:
             logger.warning("Couldn't reach Proton Drive to verify authentication: " + str(e))
+            if not self._authenticated:
+                # A signed-out warning only ever means "the binary can't run";
+                # this failure proves it ran, so don't leave a stale one up.
+                self._auth_warning = None
         except Exception as e:
             logger.warning("Couldn't verify Proton Drive authentication: " + str(e))
             # Not an auth answer, but the session may be dead: warn, don't guess.
-            if self._authenticated:
+            # A signal-killed CLI can't answer for ANY state, so surface it
+            # even when signed out — otherwise the status page just says "not
+            # signed in" and sends the user chasing credentials.
+            if self._authenticated or _is_signal_death(e):
                 self._auth_warning = str(e)
+            else:
+                self._auth_warning = None   # see the timeout branch above
         finally:
             self._auth_checked = True
         return self._authenticated
@@ -336,6 +382,8 @@ class ProtonCli:
                 output = "\n".join(seen)
                 if _classify_failure(output) is ProtonConnectionError:
                     raise ProtonConnectionError(output[-500:])
+                if rc < 0:
+                    raise ProtonError(_signal_message(rc), rc)
                 raise ProtonError(
                     "The sign-in process exited before showing a link (exit {}). "
                     "Is the keyring/secret service available?".format(rc))
@@ -358,6 +406,8 @@ class ProtonCli:
                 self._authenticated = True
                 self._auth_warning = None
                 logger.info("Signed in to Proton Drive")
+            elif proc.returncode < 0:
+                self._login_error = "Sign-in didn't complete: " + _signal_message(proc.returncode)
             else:
                 self._login_error = "Sign-in didn't complete (exit {}).".format(proc.returncode)
         finally:
@@ -461,7 +511,8 @@ class ProtonCli:
         folder (so it stops showing up in listings) without a permanent,
         irreversible delete.  strict=True propagates CLI failures so callers
         can keep local state in sync with the remote; strict=False is
-        best-effort (used for cleanup).
+        best-effort (used for cleanup) — though a signal-killed CLI raises
+        regardless, since there is no output to interpret.
 
         Returns the CLI's per-node results ({"uid": ..., "ok": ...}; [] when
         unavailable) so callers know exactly which node was trashed — needed
@@ -488,6 +539,7 @@ class ProtonCli:
         Returns per-node {"uid", "ok"} results like trash(), and strict mode
         likewise inspects them: `delete` shares trash's exit-0-on-ok=false
         behavior (both stream SDK results without touching the exit code).
+        Like trash(), a signal-killed CLI raises even with strict=False.
         """
         result = await self._run(["filesystem", "delete", path, "--json"], check=strict)
         results = _node_results(result.stdout)

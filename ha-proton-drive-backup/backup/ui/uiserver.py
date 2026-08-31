@@ -214,10 +214,17 @@ class UiServer(Trigger, Startable):
             })
         if authenticated:
             self._coord.markAuthChanged()
+        if authenticated:
+            message = "Signed in to Proton Drive."
+        elif self._cli.authWarning():
+            # e.g. a signal-killed CLI: the probe couldn't answer at all, so
+            # don't send the user chasing credentials.
+            message = "Couldn't check: " + self._cli.authWarning()
+        else:
+            message = "Not signed in. Click Sign in to authorize with Proton Drive."
         return web.json_response({
             'authenticated': authenticated,
-            'message': "Signed in to Proton Drive." if authenticated else
-                       "Not signed in. Click Sign in to authorize with Proton Drive.",
+            'message': message,
         })
 
     async def protonlogin(self, request: Request):

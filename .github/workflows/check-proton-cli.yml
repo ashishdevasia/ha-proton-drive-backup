@@ -56,4 +56,5 @@ jobs:
           To update:
           - [ ] Bump \`ARG PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/Dockerfile\`
           - [ ] Bump \`args.PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/build.yaml\`
+          - [ ] Refresh \`PROTON_CLI_SHA256_AMD64\`/\`_AARCH64\` in the Dockerfile. **amd64 pins the \`linux-x64-baseline\` flavor** (NOT plain \`linux-x64\`, which requires AVX/x86-64-v3 and SIGILLs on older CPUs/VMs — see v0.2.1 changelog); use the baseline row's checksum.
           - [ ] Re-verify the CLI error contract still matches \`_classify_failure\` in \`backup/proton/protoncli.py\`"
