@@ -382,7 +382,7 @@
     if (!s) return "null";
     var parts = [
       state.tab, s.syncing ? 1 : 0, s.proton_authenticated ? 1 : 0, s.enable_proton_upload ? 1 : 0,
-      s.backup_cooldown_active ? 1 : 0, s.proton_login_in_progress ? 1 : 0, s.proton_auth_warning ? 1 : 0,
+      s.backup_cooldown_active ? 1 : 0, s.proton_login_in_progress ? 1 : 0, s.proton_auth_warning || "",
       s.last_error ? s.last_error.error_type : "", s.last_error_count || 0,
       s.next_backup_text || "", s.last_backup_text || "", s.proton_folder || ""
     ];
@@ -548,8 +548,8 @@
         statTile("Next backup", s.next_backup_text, s.next_backup_detail, "clock"),
         statTile("Last backup", s.last_backup_text, s.last_backup_detail, "check"),
         statTile("Proton Drive",
-          !s.proton_authenticated ? "Signed out" : s.proton_auth_warning ? "Connected (unverified)" : "Connected",
-          !s.proton_authenticated ? "Sign in required" : s.proton_auth_warning ? "Session couldn't be verified" : ("Folder: " + (s.proton_folder || "—")), "cloud")
+          !s.proton_authenticated ? (s.proton_auth_warning ? "Unavailable" : "Signed out") : s.proton_auth_warning ? "Connected (unverified)" : "Connected",
+          !s.proton_authenticated ? (s.proton_auth_warning ? "Proton Drive CLI problem" : "Sign in required") : s.proton_auth_warning ? "Session couldn't be verified" : ("Folder: " + (s.proton_folder || "—")), "cloud")
       ])
     ]);
     // disable backup button if can't
@@ -653,12 +653,21 @@
     if (!s.enable_proton_upload) return;
     if (s.proton_authenticated && s.proton_auth_warning) {
       host.appendChild(banner("warn", "cloud", "Proton Drive session couldn't be verified",
-        "The last check failed unexpectedly. Backups will still be attempted; if they keep failing, sign in again.",
+        "The last check failed: " + s.proton_auth_warning +
+        " Backups will still be attempted; if they keep failing, sign in again.",
         [{ label: "Sign in again", cls: "btn", fn: openLogin },
          { label: "Sign out", cls: "btn ghost", fn: openProtonLogout }]));
       return;
     }
     if (s.proton_authenticated) return;
+    if (s.proton_auth_warning) {
+      // e.g. the CLI binary crashing before it can even answer: signing in
+      // isn't the fix, so don't lead with it.
+      host.appendChild(banner("warn", "cloud", "Proton Drive isn't working",
+        s.proton_auth_warning,
+        [{ label: "Sign in to Proton", cls: "btn ghost", fn: openLogin }]));
+      return;
+    }
     host.appendChild(banner("warn", "cloud", "Not signed in to Proton Drive",
       "Backups can be created in Home Assistant, but they won't be uploaded until you sign in to Proton Drive.",
       [{ label: "Sign in to Proton", cls: "btn", fn: openLogin }]));
@@ -1345,6 +1354,7 @@
     if (!s.proton_authenticated) {
       host.appendChild(ce("div", { class: "card" }, [
         ce("h2", { text: "Proton Drive sign-in" }),
+        s.proton_auth_warning ? ce("p", { class: "dim", text: "Last check: " + s.proton_auth_warning }) : null,
         ce("p", { class: "dim", text: "Proton Drive uses an interactive sign-in (not OAuth). Click below to start; you'll open a Proton link and complete sign-in, including 2-factor, in your browser." }),
         ce("p", { class: "dim", text: "This is a third-party application not officially supported by Proton." }),
         ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: "Sign in to Proton" })])
