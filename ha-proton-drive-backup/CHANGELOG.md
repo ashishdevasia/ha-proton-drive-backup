@@ -1,3 +1,9 @@
+## v0.2.1 [2026-09-01]
+
+- Fixed: v0.2.0 didn't work on older CPUs and some VMs, showing a
+  misleading authentication failure
+- Better error messages when the Proton Drive CLI crashes
+
 ## v0.2.0 [2026-08-31]
 
 - `proton_folder_name` can now be a nested path, e.g. `backups/ha`; missing folder levels are created automatically.

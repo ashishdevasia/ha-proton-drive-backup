@@ -26,6 +26,12 @@ class ProtonCliMissing(KnownError):
     def __init__(self, path: str = None):
         self._path = path
 
+    def __str__(self):
+        # Readable in logs/UI, not just the bare path.  Overriding __str__
+        # (rather than passing the text to super().__init__) leaves args
+        # untouched, so pickle/copy reconstruction can't double-wrap.
+        return self.message()
+
     def message(self):
         return "The proton-drive CLI couldn't be found at '{}'.".format(self._path)
 
@@ -39,6 +45,9 @@ class ProtonCliMissing(KnownError):
 class ProtonTimeout(KnownTransient):
     def __init__(self, command: str = None):
         self._command = command
+
+    def __str__(self):
+        return self.message()  # readable, not just the command; see ProtonCliMissing
 
     def message(self):
         return "A Proton Drive operation timed out ({}).".format(self._command)
@@ -68,6 +77,12 @@ class ProtonError(KnownError):
     def __init__(self, detail: str = None, returncode: int = None):
         self._detail = detail
         self._returncode = returncode
+
+    def __str__(self):
+        # Without this, a two-arg ProtonError stringifies as the args tuple,
+        # which leaks into logs and the UI's auth warning.  See ProtonCliMissing
+        # for why __str__ and not super().__init__(message).
+        return self.message()
 
     def message(self):
         return self._detail or "The proton-drive CLI returned an error."

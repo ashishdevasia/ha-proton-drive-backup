@@ -390,6 +390,30 @@ async def test_delete_failure_keeps_local_source(tmp_path):
     assert folder + "/abc123" + TAR_SUFFIX in cli.files
 
 
+async def test_delete_completes_when_metadata_trash_is_killed(tmp_path):
+    # A signal-killed CLI raises even from the best-effort metadata trash;
+    # delete() must still drop the local source and purge the tar it already
+    # trashed (the metadata sidecar is retried by get()'s orphan sweep later).
+    from backup.proton.exceptions import ProtonError
+    src, cli = make_source(tmp_path)
+    backup = FakeBackup()
+    backup.addSource(await src.save(backup, FakeSource(b"d")))
+    real_trash = cli.trash
+
+    async def killed_on_metadata(path, strict=False):
+        if path.endswith(METADATA_SUFFIX):
+            raise ProtonError("proton-drive was killed by signal 4 (SIGILL)", -4)
+        return await real_trash(path, strict)
+
+    cli.trash = killed_on_metadata
+    folder = "/my-files/HA Backups"
+    await src.delete(backup)
+    assert backup.getSource(SOURCE_PROTON_DRIVE) is None
+    assert folder + "/abc123" + TAR_SUFFIX not in cli.files
+    delete_paths = [c[1] for c in cli.calls if c[0] == "delete"]
+    assert "/trash/abc123" + TAR_SUFFIX in delete_paths
+
+
 async def test_delete_purges_trash_by_default(tmp_path):
     # Trashed items keep counting toward the Proton quota, so by default a
     # deleted backup is trashed and then purged from the trash (tar + sidecar).

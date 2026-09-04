@@ -296,6 +296,58 @@ async def test_warning_cleared_on_definite_signout(tmp_path):
     assert cli.authWarning() is None
 
 
+async def test_killed_by_signal_names_the_signal(tmp_path):
+    # A SIGILL death (e.g. a CLI binary built for a newer CPU) must be reported
+    # as a killed process, never interpreted from its (empty) output.
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError) as ei:
+        await cli.info("/my-files")
+    assert "SIGILL" in str(ei.value)
+    assert "CPU" in str(ei.value)
+    assert ei.value.data().get("returncode") == -4
+
+
+async def test_killed_by_signal_raises_even_best_effort(tmp_path):
+    # check=False callers read meaning from the output; a killed process has
+    # none, so the signal death must surface rather than read as benign.
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError):
+        await cli.trash("/my-files/x.tar", strict=False)
+
+
+async def test_checkauth_signal_death_keeps_state_and_warns(tmp_path):
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    cli._authenticated = True
+    assert await cli.checkAuth() is True  # not an auth answer
+    assert "SIGILL" in cli.authWarning()
+
+
+async def test_checkauth_signal_death_warns_even_when_signed_out(tmp_path):
+    # Unlike ordinary unclassified failures (which only warn while signed in),
+    # a killed binary can't answer for any state; a fresh install must see the
+    # CPU hint on the status page, not just "not signed in".
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    assert await cli.checkAuth() is False
+    assert "SIGILL" in cli.authWarning()
+
+
+async def test_signed_out_signal_warning_cleared_when_binary_runs(tmp_path):
+    # A signed-out warning only ever means "the binary can't run"; any later
+    # failure that proves it ran must clear it, or the UI keeps blaming the
+    # CPU for an unrelated problem.
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    await cli.checkAuth()
+    assert "SIGILL" in cli.authWarning()
+    write_script(tmp_path, 'echo "unexpected server error" >&2\nexit 2\n')
+    await cli.checkAuth()
+    assert cli.authWarning() is None
+
+
 async def test_start_login_offline_raises_connection_error(tmp_path):
     binary = write_script(
         tmp_path,
@@ -408,6 +460,26 @@ async def test_start_login_errors_when_no_url(tmp_path):
     with pytest.raises(ProtonError):
         await cli.startLogin()
     assert cli.loginInProgress() is False
+
+
+async def test_start_login_killed_by_signal_names_the_signal(tmp_path):
+    # Dies before printing the sign-in link (the reporter's SIGILL case).
+    binary = write_script(tmp_path, 'kill -ILL $$\n')
+    cli = make_cli(tmp_path, binary)
+    with pytest.raises(ProtonError) as ei:
+        await cli.startLogin()
+    assert "SIGILL" in str(ei.value)
+    assert cli.loginInProgress() is False
+
+
+async def test_login_killed_after_url_reports_signal(tmp_path):
+    # Dies after printing the link, while the user is "in the browser".
+    binary = write_script(tmp_path, LOGIN_BLOCK + "sleep 0.2\nkill -ILL $$\n")
+    cli = make_cli(tmp_path, binary)
+    await cli.startLogin()
+    await cli._login_task
+    assert cli.isAuthenticated() is False
+    assert "SIGILL" in cli.loginError()
 
 
 async def test_cancel_login_kills_process(tmp_path):
