@@ -1,4 +1,8 @@
-## v0.2.1 [2026-09-01]
+## v0.2.2 [2026-09-20]
+
+- Dependency updates
+
+## v0.2.1 [2026-09-05]
 
 - Fixed: v0.2.0 didn't work on older CPUs and some VMs, showing a
   misleading authentication failure
