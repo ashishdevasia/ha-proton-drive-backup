@@ -226,7 +226,7 @@ class ProtonCli:
     def _healCorruptEventsLock(self, env: Dict[str, str]) -> bool:
         """
         Delete events.lock iff it exists but isn't parseable JSON — the one
-        lock state the CLI (verified v0.4.6-v0.8.0) can't recover from: its
+        lock state the CLI (verified v0.4.6-v0.9.0) can't recover from: its
         init tolerates only ENOENT and heals parseable stale locks itself.
         Returns True if the file was deleted.
         """
@@ -522,7 +522,7 @@ class ProtonCli:
         result = await self._run(["filesystem", "trash", path, "--json"], check=strict)
         results = _node_results(result.stdout)
         # The CLI exits 0 even when a node's trash result is ok=false (only
-        # thrown errors set the exit code — per the CLI source, v0.8.0), so
+        # thrown errors set the exit code — per the CLI source, v0.8.0-v0.9.0), so
         # strict mode must also inspect the results, not just the exit code.
         if strict:
             _check_node_results("trash", path, results, result.returncode)

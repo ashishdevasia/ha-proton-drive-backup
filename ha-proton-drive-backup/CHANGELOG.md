@@ -1,3 +1,16 @@
+## v0.3.0 [2026-11-01]
+
+- Security fix: the bundled Proton Drive CLI no longer trusts the compromised eMudhra root certificates
+- Security fixes for the web UI: the ingress port only accepts Home Assistant's ingress, the extra server blocks
+  requests from other websites, and `require_login` only lets administrators sign in
+- Fixed: saving settings with "Show advanced" off reset the advanced settings to their defaults
+- Fixed: signing in to the extra server failed for passwords with non-ASCII characters
+- Updated the bundled Proton Drive CLI from 0.8.0 to 0.9.0
+- Dependency updates
+
+**Breaking:** scripts must call the extra server's API (not the ingress port), and use POST for anything that
+  changes something.
+
 ## v0.2.2 [2026-09-20]
 
 - Dependency updates

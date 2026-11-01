@@ -13,7 +13,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
 
       - name: Read pinned and latest versions
         id: versions
@@ -56,5 +56,7 @@ jobs:
           To update:
           - [ ] Bump \`ARG PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/Dockerfile\`
           - [ ] Bump \`args.PROTON_CLI_VERSION\` in \`ha-proton-drive-backup/build.yaml\`
-          - [ ] Refresh \`PROTON_CLI_SHA256_AMD64\`/\`_AARCH64\` in the Dockerfile. **amd64 pins the \`linux-x64-baseline\` flavor** (NOT plain \`linux-x64\`, which requires AVX/x86-64-v3 and SIGILLs on older CPUs/VMs — see v0.2.1 changelog); use the baseline row's checksum.
-          - [ ] Re-verify the CLI error contract still matches \`_classify_failure\` in \`backup/proton/protoncli.py\`"
+          - [ ] Refresh \`PROTON_CLI_SHA256_AMD64\`/\`_AARCH64\` in the Dockerfile. **The amd64 build must run without AVX**: since 0.9.0 Proton ships only plain \`linux-x64\` (no \`-baseline\` row), built with Bun 1.4, whose only x64 target is Nehalem. CLI 0.7/0.8's plain build needed AVX/x86-64-v3 and SIGILLed on older CPUs/VMs (see v0.2.1 changelog). Confirm the new binary still runs under \`qemu-x86_64 -cpu Nehalem\` against a non-AVX glibc: \`-L\` a full Debian rootfs (debootstrap), since a host glibc built for x86-64-v3 SIGILLs on its own and a bare libc6 extract lets the host's \`nsswitch.conf\`/NSS modules in, which crash on DNS and look like a CPU problem. Check a TLS fetch (\`BUN_BE_BUN=1 ... -e \"fetch(...)\"\`), not just startup, with 0.8.0's plain \`linux-x64\` SIGILLing as the control; if a \`linux-x64-baseline\` row comes back, pin that one.
+          - [ ] Run \`python3 ha-proton-drive-backup/distrust_roots.py\` and then \`distrust_roots.py --verify\` on a copy of the new linux-x64 binary (verify runs it). Both must pass; a root listed for review stops them for a decision. To prune, run \`--verify\` on an UNPATCHED copy: it lists every distrusted root the CLI still trusts, and a \`DISTRUSTED\` entry can go only once it's missing from that list, i.e. Proton's CLI no longer trusts that root at all.
+          - [ ] Re-verify the CLI error contract still matches \`_classify_failure\` in \`backup/proton/protoncli.py\`
+          - [ ] Re-check every CLI behavior that a code comment pins to a version range against the source diff, then extend the range (\`grep -rn $PINNED ha-proton-drive-backup/backup ha-proton-drive-backup/tests\` lists them)"

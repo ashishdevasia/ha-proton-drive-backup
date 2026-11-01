@@ -630,7 +630,7 @@ class ProtonSource(BackupDestination, Startable):
                 # `delete /trash/<name>` resolves the name by scanning the
                 # trash and acting on the FIRST match, and `info /trash/<name>`
                 # uses the very same resolver (verified in the CLI source,
-                # v0.8.0, both via getTrashedNode; its entity carries the same
+                # v0.8.0-v0.9.0, both via getTrashedNode; its entity carries the same
                 # plain-string uid that `trash --json` reports).  So probe
                 # which node the name denotes right now, and delete only when
                 # it's exactly the node just trashed: a same-named item the
@@ -722,7 +722,7 @@ class ProtonSource(BackupDestination, Startable):
         try:
             with open(meta_local, "w", encoding="utf-8") as f:
                 json.dump(meta, f)
-            # create-new-revision, not the default "replace": in CLI 0.8.0
+            # create-new-revision, not the default "replace": in CLI 0.8.0-0.9.0
             # "replace" moves the old same-named file to the TRASH (with no
             # uid reported), so every rewrite would grow the trash with a
             # sidecar the purge can never positively re-identify.  A new
