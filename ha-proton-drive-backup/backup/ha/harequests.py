@@ -94,6 +94,11 @@ class HaRequests():
         await self._postHassioData(self.getSupervisorURL().with_path("auth"), {"username": user, "password": password}, headers=self._altAuthHeaders())
 
     @supervisor_call
+    async def listUsers(self) -> Dict[str, Any]:
+        # Home Assistant's users, with their group_ids (needs hassio_role admin).
+        return await self._getHassioData(self.getSupervisorURL().with_path("auth/list"))
+
+    @supervisor_call
     async def upload(self, stream):
         url = self.getSupervisorURL().with_path("{0}/new/upload".format(self._getBackupPath()))
         return await self._postHassioData(url, data=stream)

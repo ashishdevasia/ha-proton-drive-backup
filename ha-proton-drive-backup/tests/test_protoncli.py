@@ -86,7 +86,7 @@ async def test_checkauth_keeps_state_on_unrecognized_failure(tmp_path):
 def write_offline_script(tmp_path):
     """Fake CLI failing on network, with the whole body on stderr.
 
-    NOT the real stream split: v0.4.6-v0.8.0 put only the `===` banner on
+    NOT the real stream split: v0.4.6-v0.9.0 put only the `===` banner on
     stderr and everything below it on stdout, so `_classify_failure` (which
     reads stderr) can't actually see these codes in production.
     """
@@ -648,7 +648,7 @@ async def test_trash_tolerates_unparseable_output(tmp_path):
 
 # --- Corrupt events.lock self-heal --------------------------------------------
 # An unparseable events.lock crashes every CLI run at init (verified against
-# the real binary, v0.4.6-v0.8.0).  The wrapper deletes it and retries once.
+# the real binary, v0.4.6-v0.9.0).  The wrapper deletes it and retries once.
 
 def _plant_lock(tmp_path, content: bytes):
     # conftest pins XDG_DATA_HOME to tmp_path/"xdg-data" for env isolation.

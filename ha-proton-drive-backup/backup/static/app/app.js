@@ -646,7 +646,7 @@
     if (!s.backup_cooldown_active) return;
     host.appendChild(banner("warn", "clock", "Startup cooldown active",
       "New backups are paused briefly after start-up to let Home Assistant settle.",
-      [{ label: "Back up now anyway", cls: "btn", fn: function () { action(api("/ignorestartupcooldown"), "Skipping cooldown — starting now"); } }]));
+      [{ label: "Back up now anyway", cls: "btn", fn: function () { action(api("/ignorestartupcooldown", { method: "POST" }), "Skipping cooldown — starting now"); } }]));
   }
 
   function renderAuthBanner(host, s) {
@@ -715,11 +715,11 @@
       case "proton_cant_connect": case "proton_timeout":
         out.push({ label: "Retry now", cls: "btn", fn: doSync }); break;
       case "multiple_deletes":
-        out.push({ label: "Delete them, just this once", cls: "btn", fn: function () { action(api("/confirmdelete"), "Confirmed — cleaning up"); } });
-        out.push({ label: "Always allow", cls: "btn ghost", fn: function () { action(api("/confirmdelete?always=true"), "Saved — I won't ask again"); } });
+        out.push({ label: "Delete them, just this once", cls: "btn", fn: function () { action(api("/confirmdelete", { method: "POST" }), "Confirmed — cleaning up"); } });
+        out.push({ label: "Always allow", cls: "btn ghost", fn: function () { action(api("/confirmdelete?always=true", { method: "POST" }), "Saved — I won't ask again"); } });
         break;
       case "low_space": case "drive_full":
-        out.push({ label: "Skip the space check", cls: "btn", fn: function () { action(api("/skipspacecheck"), "Skipping space check"); } });
+        out.push({ label: "Skip the space check", cls: "btn", fn: function () { action(api("/skipspacecheck", { method: "POST" }), "Skipping space check"); } });
         break;
       default:
         out.push({ label: "Retry now", cls: "btn", fn: doSync });
@@ -933,8 +933,8 @@
     if (MOCK) { toast("Download started (mock)", "info"); return; }
     var a = ce("a", { href: href, download: "" }); document.body.appendChild(a); a.click(); a.remove();
   }
-  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug)), "Downloading to Home Assistant in the background"); }
-  function uploadBackupToProton(b) { action(api("/uploadToProton?slug=" + encodeURIComponent(b.slug)), "Uploading to Proton Drive in the background"); }
+  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug), { method: "POST" }), "Downloading to Home Assistant in the background"); }
+  function uploadBackupToProton(b) { action(api("/uploadToProton?slug=" + encodeURIComponent(b.slug), { method: "POST" }), "Uploading to Proton Drive in the background"); }
   function toggleRetain(b, sourceKey, value) {
     var sources = {}; (b.sources || []).forEach(function (s) { sources[s.key] = !!s.retained; });
     sources[sourceKey] = value;
@@ -943,12 +943,16 @@
   function toggleIgnore(b, value) { action(apiJson("/ignore", { slug: b.slug, ignore: value })); }
   function doSync() {
     if (state.status && state.status.syncing) { toast("A sync is already running", "info"); return; }
-    action(api("/startSync"), "Sync started").catch(function () {});
+    action(api("/startSync", { method: "POST" }), "Sync started").catch(function () {});
   }
 
   // ------------------------------------------------------------------------
   // View: Settings
   // ------------------------------------------------------------------------
+  // getconfig sends this in place of a saved backup password, and saveconfig
+  // maps it back (PASSWORD_PLACEHOLDER in uiserver.py).
+  var PASSWORD_PLACEHOLDER = "<unchanged>";
+
   var SETTINGS_GROUPS = [
     {
       title: "Backup schedule", icon: "clock",
@@ -1070,7 +1074,8 @@
     var draft = state.configDraft || {};
     var cfg = (state.config && state.config.config) || {};
     var defs = (state.config && state.config.defaults) || {};
-    return (key in draft) ? draft[key] : (cfg[key] != null && cfg[key] !== "" ? cfg[key] : defs[key]);
+    if (key in draft) return draft[key] === "" ? defs[key] : draft[key];
+    return cfg[key] != null && cfg[key] !== "" ? cfg[key] : defs[key];
   }
   function effNum(key) { return Number(effVal(key)) || 0; }
   function effBool(key) { var v = effVal(key); return v === true || v === "true"; }
@@ -1171,7 +1176,7 @@
       sel.appendChild(ce("option", { value: "", text: "— default —" }));
       f.options.forEach(function (o) { sel.appendChild(ce("option", { value: o[0], text: o[1] })); });
       sel.value = val != null ? String(val) : "";
-      sel.addEventListener("change", function () { if (sel.value !== "") draft[f.key] = sel.value; else delete draft[f.key]; });
+      sel.addEventListener("change", function () { draft[f.key] = sel.value; });
       wrap.appendChild(sel);
     } else if (f.type === "color") {
       var def = defs[f.key] || (f.key === "accent_color" ? "#1a5fb4" : "#0b1020");
@@ -1197,12 +1202,18 @@
       if (f.placeholder) attrs.placeholder = f.placeholder;
       else if (defs[f.key] != null && defs[f.key] !== "") attrs.placeholder = "default: " + defs[f.key];
       var input = ce("input", attrs);
-      // Empty = "use the default"; drop it from the draft so we never submit an
-      // out-of-range 0 for fields that have a minimum.
+      // Empty = "use the default": drafted as "" (never Number("") = 0, which
+      // fields with a minimum reject), and collectConfig doesn't send it.
       input.addEventListener("input", function () {
-        if (input.value === "") delete draft[f.key];
-        else draft[f.key] = f.type === "number" ? Number(input.value) : input.value;
+        draft[f.key] = f.type === "number" && input.value !== "" ? Number(input.value) : input.value;
       });
+      if (f.type === "password" && val === PASSWORD_PLACEHOLDER) {
+        // The field stands in for the saved password; the first edit replaces
+        // the placeholder instead of extending it.
+        input.addEventListener("beforeinput", function () {
+          if (input.value === PASSWORD_PLACEHOLDER) input.value = "";
+        });
+      }
       wrap.appendChild(input);
       if (f.template) wrap.appendChild(templateHints());
     }
@@ -1252,10 +1263,15 @@
 
   function collectConfig() {
     var out = {};
-    // Seed with drafted edits first so fields hidden by the advanced toggle are
-    // still saved; visible fields are then overridden from the live DOM below.
-    var draft = state.configDraft || {};
-    Object.keys(draft).forEach(function (k) { out[k] = draft[k]; });
+    // The backend replaces every option on save, so start from the saved
+    // values, then drafted edits: fields hidden by the advanced toggle aren't
+    // in the DOM and would otherwise reset to their defaults.  Visible fields
+    // are then overridden from the live DOM below.  "" = use the default.
+    [(state.config && state.config.config) || {}, state.configDraft || {}].forEach(function (src) {
+      Object.keys(src).forEach(function (k) {
+        if (src[k] == null || src[k] === "") delete out[k]; else out[k] = src[k];
+      });
+    });
     var form = el("#settings-form"); if (!form) return out;
     // scalar inputs
     form.querySelectorAll("[data-key]").forEach(function (inp) {
@@ -1467,7 +1483,7 @@
       ce("button", { class: "btn", onclick: function () {
         var query = qs({ custom_name: nameInput.value, note: noteInput.value, retain_ha: retainHa.checked, retain_proton: retainProton.checked });
         closeModal();
-        action(api("/backup" + (query ? "?" + query : "")), "Backup requested");
+        action(api("/backup" + (query ? "?" + query : ""), { method: "POST" }), "Backup requested");
       } }, [iconNode("plus"), ce("span", { text: "Create backup" })])
     ];
     openModal(modal("Create a backup now", "plus", body, foot));

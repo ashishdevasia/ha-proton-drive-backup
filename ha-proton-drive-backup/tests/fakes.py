@@ -130,8 +130,8 @@ class FakeProtonCli:
             data = f.read()
         remote = parent_path.rstrip("/") + "/" + os.path.basename(local_path)
         if remote in self.files:
-            # Mirror the real CLI's file-conflict handling (v0.8.0): identical
-            # content is always skipped (before any strategy applies);
+            # Mirror the real CLI's file-conflict handling (v0.8.0-v0.9.0):
+            # identical content is always skipped (before any strategy applies);
             # otherwise "replace" moves the old file to the TRASH, while
             # "create-new-revision" updates the node in place.
             if self.files[remote] == data:

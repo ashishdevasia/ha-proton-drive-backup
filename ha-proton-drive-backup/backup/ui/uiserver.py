@@ -1,19 +1,23 @@
 import asyncio
+import functools
 import hmac
+import html
+import ipaddress
 import re
 import ssl
 import json
 from datetime import timedelta
 from os.path import abspath, join
-from typing import Any, Dict
+from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
 
 import aiohttp_jinja2
 import jinja2
 from aiohttp import BasicAuth, hdrs, web, ClientResponseError
-from aiohttp.web import HTTPException, Request, HTTPNotFound
+from aiohttp.web import HTTPException, Request, HTTPNotFound, HTTPForbidden
 from injector import inject, singleton
 
-from backup.config import Config, Setting, CreateOptions, BoolValidator, Startable, VERSION, isStaging
+from backup.config import Config, Setting, CreateOptions, BoolValidator, Startable, VERSION, isStaging, ADDON_OPTION_KEYS
 from backup.const import SOURCE_PROTON_DRIVE, SOURCE_HA, GITHUB_BUG_TEMPLATE, FOLDERS
 from backup.model import Coordinator, Backup, AbstractBackup
 from backup.exceptions import KnownError, LogicError, NoBackup, ensureKey, PleaseWait
@@ -33,6 +37,33 @@ logger = getLogger(__name__)
 
 MIME_TEXT_HTML = "text/html"
 MIME_JSON = "application/json"
+
+# Supervisor proxies ingress from this address.  The ingress port has no login
+# of its own, so nothing else on the hassio network may use it.
+INGRESS_PROXY_IP = "172.30.32.2"
+
+# Handlers that only read, so may also answer GET (polling, links, downloads).
+# Everything else is POST-only: browsers always send Origin on a cross-origin
+# POST, even over plain HTTP where they omit Sec-Fetch-Site, so
+# isCrossSiteRequest can always tell another site's POST from a script's.
+READ_ONLY_HANDLERS = {"getstatus", "getconfig", "log", "download", "makeanissue", "getTasks"}
+
+DEFAULT_PORTS = {"http": 80, "https": 443}
+
+# Sent to the UI instead of a saved backup password; posting it back keeps it.
+PASSWORD_PLACEHOLDER = "<unchanged>"
+# Set on the extra server's app when it runs without require_login.
+UNAUTHENTICATED = web.AppKey("unauthenticated", bool)
+# What the add-on runs and where that program's state lives: changing these
+# picks the code that runs with the add-on's Supervisor token.
+CODE_PATH_SETTINGS = (Setting.PROTON_CLI_PATH, Setting.PROTON_DATA_PATH)
+
+# Home Assistant's administrators group.
+HA_ADMIN_GROUP = "system-admin"
+
+# Private ranges Home Assistant counts as local (besides loopback/link-local).
+LOCAL_NETWORKS = tuple(ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"))
 
 
 @singleton
@@ -361,8 +392,14 @@ class UiServer(Trigger, Startable):
 
     async def getconfig(self, request: Request):
         await self._ha_source.refresh()
-        current_config = {s.key(): self.config.getForUi(s) for s in Setting}
-        default_config = {s.key(): s.default() for s in Setting}
+        # Only the options config.json declares: internal Settings (paths, the
+        # Supervisor URL/token) are none of the UI's business.
+        options = [s for s in Setting if s.key() in ADDON_OPTION_KEYS]
+        current_config = {s.key(): self.config.getForUi(s) for s in options}
+        default_config = {s.key(): s.default() for s in options}
+        password = current_config.get(Setting.BACKUP_PASSWORD.key())
+        if password and not password.startswith("!secret "):
+            current_config[Setting.BACKUP_PASSWORD.key()] = PASSWORD_PLACEHOLDER
         return web.json_response({
             'config': current_config,
             'addons': self._global_info.addons,
@@ -406,9 +443,42 @@ class UiServer(Trigger, Startable):
                 body = body.replace("{" + key + "}", str(data[key]))
         return web.json_response({'markdown': body})
 
+    def _uiConfigUpdate(self, submitted: Dict[str, Any], unauthenticated: bool = False) -> Dict[str, Any]:
+        """
+        Reduce a /saveconfig payload to the options config.json declares.
+        Config.validate accepts every Setting, including internal ones like
+        supervisor_url, so an unfiltered payload could repoint the add-on (and
+        its Supervisor token) at another server.
+        """
+        ignored = sorted(k for k in submitted if k not in ADDON_OPTION_KEYS)
+        if ignored:
+            logger.warning("Ignored settings the web UI can't change: %s", ", ".join(ignored))
+        update = {k: v for k, v in submitted.items() if k in ADDON_OPTION_KEYS}
+        if update.get(Setting.BACKUP_PASSWORD.key()) == PASSWORD_PLACEHOLDER:
+            update[Setting.BACKUP_PASSWORD.key()] = self.config.get(Setting.BACKUP_PASSWORD)
+        if unauthenticated:
+            # Every other add-on can reach the extra server, so without login
+            # it may keep or reset these paths but not point them elsewhere.
+            for setting in CODE_PATH_SETTINGS:
+                value = update.get(setting.key(), setting.default())
+                if value not in (self.config.get(setting), setting.default()):
+                    logger.warning("Refused to change %s through the extra server without "
+                                   "require_login", setting.key())
+                    raise HTTPForbidden(reason="Without require_login, the extra server can't change {}; "
+                                               "set it in the add-on's Configuration tab".format(setting.key()))
+        return update
+
     async def saveconfig(self, request: Request) -> Any:
-        data = await request.json()
-        update = ensureKey("config", data, "the configuration update request")
+        try:
+            data = await request.json()
+        except ValueError:
+            raise web.HTTPBadRequest(reason="the request body isn't JSON")
+        if not isinstance(data, dict):
+            raise web.HTTPBadRequest(reason="the request body must be an object")
+        submitted = ensureKey("config", data, "the configuration update request")
+        if not isinstance(submitted, dict):
+            raise web.HTTPBadRequest(reason="config must be an object")
+        update = self._uiConfigUpdate(submitted, request.app.get(UNAUTHENTICATED, False))
         Password(self.config.getConfigFor(update)).resolve()
         validated, needUpdate = self.config.validate(update)
         message = await self._updateConfiguration(validated, trigger=False)
@@ -578,6 +648,7 @@ class UiServer(Trigger, Startable):
         else:
             resp.content_type = 'text/plain'
             resp.headers['Content-Disposition'] = 'attachment; filename="home-assistant-proton-drive-backup.log"'
+        resp.headers['X-Content-Type-Options'] = 'nosniff'
         await resp.prepare(request)
 
         def content():
@@ -586,7 +657,12 @@ class UiServer(Trigger, Startable):
             for line in getHistory(self.last_log_index, format == "colored"):
                 self.last_log_index = line[0]
                 if line:
-                    yield line[1].replace("\n", "   \n") + "\n"
+                    text = line[1]
+                    if format == "html":
+                        # Log lines carry user-controlled text (backup names,
+                        # CLI output, request details).
+                        text = html.escape(text)
+                    yield text.replace("\n", "   \n") + "\n"
             if format == "html":
                 yield "</pre></body>\n"
         for line in content():
@@ -608,7 +684,7 @@ class UiServer(Trigger, Startable):
 
     async def run(self) -> None:
         await self.stop()
-        app = web.Application(middlewares=[self.error_middleware])
+        app = web.Application(middlewares=[ingress_source_middleware, self.error_middleware])
         aiohttp_jinja2.setup(app, loader=jinja2.FileSystemLoader(self.filePath()))
         self._addRoutes(app)
         logger.info("Starting server on port {}".format(self.config.get(Setting.INGRESS_PORT)))
@@ -630,6 +706,7 @@ class UiServer(Trigger, Startable):
                         "backups. Enable 'require_login' unless this is intentional.",
                         self.config.get(Setting.PORT))
                 extra_app = web.Application(middlewares=middleware)
+                extra_app[UNAUTHENTICATED] = not self.config.get(Setting.REQUIRE_LOGIN)
                 aiohttp_jinja2.setup(extra_app, loader=jinja2.FileSystemLoader(self.filePath()))
                 self._addRoutes(extra_app)
                 logger.info("Starting server on port {}".format(self.config.get(Setting.PORT)))
@@ -668,10 +745,12 @@ class UiServer(Trigger, Startable):
             self._addRoute(app, handler)
 
     def _addRoute(self, app, method):
-        app.add_routes([
-            web.get("/" + method.__name__, method),
-            web.post("/" + method.__name__, method)
-        ])
+        read_only = method.__name__ in READ_ONLY_HANDLERS
+        handler = sameOriginOnly(method, read_only)
+        routes = [web.post("/" + method.__name__, handler)]
+        if read_only:
+            routes.append(web.get("/" + method.__name__, handler))
+        app.add_routes(routes)
 
     async def start(self):
         await self.run()
@@ -744,24 +823,161 @@ class UiServer(Trigger, Startable):
         return abspath(join(__file__, "..", "..", "static", name))
 
 
+def _clientIp(remote):
+    """The client's address (IPv4-mapped IPv6 unwrapped), or None if unparseable."""
+    try:
+        ip = ipaddress.ip_address(remote)
+    except ValueError:
+        return None
+    return getattr(ip, "ipv4_mapped", None) or ip
+
+
+def isIngressSource(remote) -> bool:
+    """True for Supervisor's ingress proxy, or loopback (dev server, tests)."""
+    ip = _clientIp(remote)
+    return ip is not None and (ip.is_loopback or str(ip) == INGRESS_PROXY_IP)
+
+
+@web.middleware
+async def ingress_source_middleware(request: Request, handler):
+    if not isIngressSource(request.remote):
+        logger.warning("Refused a request to the ingress port from %s: only Home "
+                       "Assistant's ingress proxy may use it", request.remote)
+        raise HTTPForbidden()
+    return await handler(request)
+
+
+def _hostPort(netloc: str, scheme: str):
+    """(host, port) of a Host-style netloc; no port means the scheme's default."""
+    try:
+        parts = urlsplit("//" + netloc)
+        return (parts.hostname or "", parts.port or DEFAULT_PORTS.get(scheme))
+    except ValueError:
+        return None
+
+
+def isCrossSiteRequest(request: Request, read_only: bool = False) -> bool:
+    """
+    True if a browser sent this on behalf of another site, e.g. a form on a
+    malicious page riding on the extra server's saved Basic-auth credentials.
+    Scripts and curl send neither header checked here, so they keep working.
+    """
+    site = request.headers.get("Sec-Fetch-Site")
+    if site is not None:
+        # "none" is a navigation the user started (address bar, bookmark, a
+        # link opened from another app): fine for reading, never for changes.
+        return not (site == "same-origin" or (read_only and site == "none"))
+    # No Sec-Fetch-Site: plain HTTP (browsers send it only to HTTPS/localhost)
+    # or an old browser.  Either still sends Origin on a cross-origin POST.
+    # Behind ingress the proxies pass the browser's Host through and add
+    # X-Forwarded-Host, so accept either.
+    origin = request.headers.get(hdrs.ORIGIN)
+    if origin is None:
+        return False
+    try:
+        parts = urlsplit(origin)
+        wanted = (parts.hostname, parts.port or DEFAULT_PORTS.get(parts.scheme))
+    except ValueError:
+        return True  # malformed
+    if not parts.hostname:
+        return True  # "null": sandboxed frames, cross-origin redirects
+    hosts = [request.headers.get(hdrs.HOST, "")] + request.headers.get(hdrs.X_FORWARDED_HOST, "").split(",")
+    return all(_hostPort(h.strip(), parts.scheme) != wanted for h in hosts if h.strip())
+
+
+def sameOriginOnly(handler, read_only: bool = False):
+    """Wrap an API handler so other sites can't call it through the browser."""
+    @functools.wraps(handler)
+    async def guarded(request: Request):
+        if isCrossSiteRequest(request, read_only):
+            # The headers it was judged on: a reverse proxy that drops the
+            # port from Host makes the UI's own requests look cross-site.
+            logger.warning("Refused a cross-site request to %s (Sec-Fetch-Site: %s, Origin: %s, "
+                           "Host: %s, X-Forwarded-Host: %s)", request.path,
+                           *(request.headers.get(h) for h in ("Sec-Fetch-Site", hdrs.ORIGIN, hdrs.HOST,
+                                                              hdrs.X_FORWARDED_HOST)))
+            raise HTTPForbidden()
+        return await handler(request)
+    return guarded
+
+
+def isLocalAddress(remote) -> bool:
+    """
+    Whether a client address is local, as HA requires for local-only users.
+    Mirrors homeassistant.util.network.is_local; ipaddress's own is_private
+    is broader (it counts documentation and reserved ranges).
+    """
+    ip = _clientIp(remote)
+    return ip is not None and (ip.is_loopback or ip.is_link_local
+                               or any(ip in net for net in LOCAL_NETWORKS))
+
+
+async def findHomeAssistantAdmin(harequests, username) -> Optional[Dict[str, Any]]:
+    """
+    The /auth/list entry of the active admin that `username` signs in as, or
+    None.  Supervisor's /auth only checks the password, so any Home Assistant
+    user passes it; ingress, by contrast, is admin-only.  Match that here.
+    """
+    # HA compares usernames case-folded and checks the password against the
+    # LAST user whose name folds to it, so if several do there's no telling
+    # whose password Supervisor accepted: refuse rather than guess.
+    wanted = username.strip().casefold()
+    matches = [user for user in (await harequests.listUsers()).get("users", [])
+               if (user.get("username") or "").strip().casefold() == wanted]
+    if len(matches) != 1:
+        return None
+    user = matches[0]
+    if not user.get("is_active", True):
+        return None
+    if not (user.get("is_owner") or HA_ADMIN_GROUP in (user.get("group_ids") or [])):
+        return None
+    return user
+
+
+def decodeBasicAuth(header: str) -> Optional[BasicAuth]:
+    # Browsers send Basic credentials as UTF-8; fall back to aiohttp's latin-1
+    # default for clients that don't.
+    for encoding in ("utf-8", "latin1"):
+        try:
+            return BasicAuth.decode(auth_header=header, encoding=encoding)
+        except ValueError:
+            continue
+    return None
+
+
 def makeLoginMiddleware(time, harequests):
     auth_cache: Dict[str, Any] = {}
     realm = "Home Assistant Login"
     # Cap the cache so a flood of distinct usernames can't grow it without bound.
     MAX_CACHED = 1024
 
-    async def check_credentials(username, password):
+    def allowed_from(username, local_only, remote):
+        # HA refuses remote logins for users limited to local access.
+        if local_only and not isLocalAddress(remote):
+            logger.warning("Refused login for '%s' from %s: that user may only sign in "
+                           "from the local network", username, remote)
+            return False
+        return True
+
+    async def check_credentials(username, password, remote):
         if username is None or password is None:
             return False
         cached = auth_cache.get(username)
-        if cached and hmac.compare_digest(cached['password'], password) and cached['timeout'] > time.now():
-            return True
+        if cached and cached['timeout'] > time.now() and hmac.compare_digest(
+                cached['password'].encode("utf-8"), password.encode("utf-8")):
+            return allowed_from(username, cached['local_only'], remote)
         try:
             await harequests.auth(username, password)
+            user = await findHomeAssistantAdmin(harequests, username)
+            if user is None:
+                logger.warning("Refused login for '%s': only Home Assistant administrators "
+                               "may use the extra server", username)
+                return False
             if len(auth_cache) >= MAX_CACHED:
                 auth_cache.clear()
-            auth_cache[username] = {'password': password, 'timeout': time.now() + timedelta(minutes=10)}
-            return True
+            auth_cache[username] = {'password': password, 'local_only': bool(user.get("local_only")),
+                                    'timeout': time.now() + timedelta(minutes=10)}
+            return allowed_from(username, auth_cache[username]['local_only'], remote)
         except Exception as e:
             logger.printException(e)
             return False
@@ -769,13 +985,8 @@ def makeLoginMiddleware(time, harequests):
     @web.middleware
     async def middleware(request: Request, handler):
         auth_header = request.headers.get(hdrs.AUTHORIZATION)
-        auth = None
-        if auth_header:
-            try:
-                auth = BasicAuth.decode(auth_header=auth_header)
-            except ValueError:
-                auth = None
-        if auth is not None and await check_credentials(auth.login, auth.password):
+        auth = decodeBasicAuth(auth_header) if auth_header else None
+        if auth is not None and await check_credentials(auth.login, auth.password, request.remote):
             return await handler(request)
         return web.Response(body=b'', status=401, reason='UNAUTHORIZED', headers={
             hdrs.WWW_AUTHENTICATE: 'Basic realm="%s"' % realm,

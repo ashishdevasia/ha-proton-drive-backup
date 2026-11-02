@@ -82,9 +82,35 @@ Two things to know when any of these are set:
 
 ### Web server / UI
 
-- `ingress`: the UI is served through Home Assistant ingress by default.
+- `ingress`: the UI is served through Home Assistant ingress by default. The
+  ingress port only answers Home Assistant's ingress proxy; to call the API
+  from scripts, use the extra server with `require_login` and an
+  administrator's credentials.
 - `expose_extra_server`, `port`, `use_ssl`, `certfile`, `keyfile`,
-  `require_login`: optionally expose the UI directly on a port.
+  `require_login`: optionally expose the UI directly on a port. With
+  `require_login`, only Home Assistant administrators can sign in, as with
+  ingress, and users limited to local access only from a private address. A
+  reverse proxy on your network makes every request look local, and so can
+  Docker when it relays a connection itself (for example from an IPv6 client
+  when Home Assistant's network has no IPv6). Checking this needs Home
+  Assistant itself running, so while it's down nobody can sign in to the
+  extra server.
+- Scripts calling the extra server's API must use POST for anything that
+  changes something; read-only calls (`getstatus`, `getconfig`, `log`,
+  `download`, `makeanissue`) also accept GET.
+- Behind a reverse proxy, pass the browser's `Host` header through, port
+  included (nginx: `proxy_set_header Host $http_host;`; `$host` drops the
+  port). This includes a proxy in front of Home Assistant, since ingress
+  passes the header on. Over plain HTTP the add-on checks it to tell its own
+  page from other sites, and refuses the UI's actions otherwise; the add-on's
+  log shows the headers of each request it refuses.
+- Without `require_login`, anyone who can reach the port can create, download
+  and delete backups and change the add-on's options. That always includes
+  every other add-on, even when the port isn't published to your network, and
+  a website you visit can do the same by tricking your browser (DNS
+  rebinding). Without login the extra server also won't change
+  `proton_cli_path` or `proton_data_path`; set those in the add-on's
+  Configuration tab. Keep `require_login` on.
 
 ## How backups are stored
 

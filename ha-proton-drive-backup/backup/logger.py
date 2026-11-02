@@ -1,4 +1,5 @@
 import logging
+from html import escape
 from logging import LogRecord, Formatter, ERROR
 from traceback import TracebackException
 from colorlog import ColoredFormatter
@@ -49,7 +50,7 @@ class HistoryHandler(logging.Handler):
                 else:
                     style = "console-default"
                 line = "<span class='" + style + \
-                    "'>" + self.format(item) + "</span>"
+                    "'>" + escape(self.format(item)) + "</span>"
                 yield (x + 1, line)
             else:
                 yield (x + 1, self.format(item))
