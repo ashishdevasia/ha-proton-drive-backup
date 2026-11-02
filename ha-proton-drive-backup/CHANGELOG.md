@@ -1,4 +1,4 @@
-## v0.3.0 [2026-11-01]
+## v0.3.0 [2026-11-02]
 
 - Security fix: the bundled Proton Drive CLI no longer trusts the compromised eMudhra root certificates
 - Security fixes for the web UI: the ingress port only accepts Home Assistant's ingress, the extra server blocks
