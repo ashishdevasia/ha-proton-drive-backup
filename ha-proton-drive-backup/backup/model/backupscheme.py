@@ -127,11 +127,20 @@ class GenerationalScheme(BackupScheme):
             day_of_week = weekday_lookup[self.config.day_of_week]
 
         last = self.time.toLocal(backups[len(backups) - 1].date())
+        # Each loop below goes back in time from the newest backup, and stops
+        # at the first period that ends before the oldest one: it and every
+        # older period would select nothing.  Counts can be anything
+        # config.json allows (e.g. "years: 9999" meant as "forever"), and going
+        # back further took seconds or minutes per purge, then failed with
+        # "year 0 is out of range" on every sync.
+        oldest = min(backup.date() for backup in backups)
         lookups: List[Partition] = []
         currentDay = self.day(last)
         if self.config.days > 0:
             for x in range(0, self.config.days + 1):
                 nextDay = self.day(currentDay, add_days=1)
+                if nextDay <= oldest:
+                    break
                 lookups.append(
                     Partition(currentDay, nextDay, currentDay, self.time, "Day {0} of {1}".format(x + 1, self.config.days), delete_only=(x >= self.config.days)))
                 currentDay = self.day(currentDay, add_days=-1)
@@ -145,6 +154,8 @@ class GenerationalScheme(BackupScheme):
                 # Move back x weeks
                 start = self.day(start, add_days=-7 * x)
                 end = self.day(start, add_days=7)
+                if end <= oldest:
+                    break
 
                 # Only consider backups from that week after the start day
                 # TODO: should this actually "prefer" the day of week but start on monday?
@@ -162,6 +173,8 @@ class GenerationalScheme(BackupScheme):
                     last.year - year_offset, last.month - month_offset, 1)
                 weekday, days = monthrange(start.year, start.month)
                 end = start + timedelta(days=days)
+                if end <= oldest:
+                    break
                 lookups.append(Partition(
                     start, end, start + timedelta(days=self.config.day_of_month - 1), self.time,
                     "{0} ({1} of {2} months)".format(start.strftime("%B"), x + 1, self.config.months), delete_only=(x >= self.config.months)))
@@ -170,6 +183,8 @@ class GenerationalScheme(BackupScheme):
             for x in range(0, self.config.years + 1):
                 start = self.time.local(last.year - x, 1, 1)
                 end = self.time.local(last.year - x + 1, 1, 1)
+                if end <= oldest:
+                    break
                 lookups.append(Partition(
                     start, end, start + timedelta(days=self.config.day_of_year - 1), self.time,
                     "{0} ({1} of {2} years)".format(start.strftime("%Y"), x + 1, self.config.years), delete_only=(x >= self.config.years)))

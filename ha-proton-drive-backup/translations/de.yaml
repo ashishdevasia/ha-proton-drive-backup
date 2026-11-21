@@ -1,0 +1,161 @@
+# Namen und Beschreibungen für den Tab „Konfiguration“ des Add-ons in Home
+# Assistant. Siehe en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Backups in Home Assistant behalten
+    description: So viele der neuesten Backups bleiben auf diesem Gerät; das älteste wird zuerst gelöscht. Bei 0 wird nie aus Home Assistant gelöscht (um keine lokalen Kopien zu behalten, aktiviere stattdessen „Nach dem Hochladen aus Home Assistant löschen“).
+  max_backups_in_proton_drive:
+    name: Backups in Proton Drive behalten
+    description: So viele der neuesten Backups bleiben in Proton Drive; das älteste wird zuerst gelöscht. Bei 0 wird nie aus Proton Drive gelöscht.
+  days_between_backups:
+    name: Tage zwischen Backups
+    description: Wie oft ein neues Backup erstellt wird, in Tagen (Dezimalzahlen erlaubt). Ist eine Uhrzeit gesetzt, wird auf ganze Tage aufgerundet. 0 schaltet geplante Backups aus.
+  ignore_other_backups:
+    name: Anderswo erstellte Backups ignorieren
+    description: Backups, die dieses Add-on nicht erstellt hat, weder verwalten noch löschen.
+  ignore_upgrade_backups:
+    name: Update-Backups ignorieren
+    description: Die Backups, die Home Assistant bei Updates automatisch erstellt, nicht mitzählen.
+  backup_storage:
+    name: Backup-Speicherort
+    description: Name des Home-Assistant-Netzwerkspeichers, in dem Backups erstellt werden, oder local-disk. Leer nutzt den Standard-Speicherort von Home Assistant.
+  delete_after_upload:
+    name: Nach dem Hochladen aus Home Assistant löschen
+    description: Backups nach dem Hochladen nur in Proton Drive behalten.
+  delete_before_new_backup:
+    name: Altes Backup löschen, bevor ein neues erstellt wird
+    description: 'Nützlich bei knappem Speicherplatz: Das älteste Backup wird zuerst entfernt.'
+  use_ssl:
+    name: SSL verwenden
+    description: Den zusätzlichen Webserver über HTTPS bereitstellen, mit „Zertifikatsdatei“ und „Schlüsseldatei“.
+  certfile:
+    name: Zertifikatsdatei
+    description: 'Zertifikat für „SSL verwenden“. Standard: /ssl/fullchain.pem.'
+  keyfile:
+    name: Schlüsseldatei
+    description: 'Privater Schlüssel für „SSL verwenden“. Standard: /ssl/privkey.pem.'
+  require_login:
+    name: Home-Assistant-Anmeldung verlangen
+    description: Auf dem zusätzlichen Webserver Benutzername und Passwort eines Home-Assistant-Administrators verlangen. Lass das an, solange der zusätzliche Server bereitgestellt ist.
+  backup_name:
+    name: Namensvorlage
+    description: Vorlage für Backup-Namen, z. B. {type} Backup {year}-{month}-{day}. Die Einstellungen der Web-UI listen alle Platzhalter auf.
+  backup_time_of_day:
+    name: Uhrzeit
+    description: Ortszeit für geplante Backups, als HH:MM (24 Stunden). Leer heißt beliebige Zeit.
+  warn_for_low_space:
+    name: Bei wenig Speicherplatz warnen
+    description: Vor einem Backup den freien Speicherplatz prüfen und mit einer Warnung anhalten, wenn er knapp ist.
+  watch_backup_directory:
+    name: Backup-Verzeichnis überwachen
+    description: Neue oder entfernte Backup-Dateien sofort bemerken statt erst bei der nächsten Synchronisierung.
+  generational_days:
+    name: Tägliche Backups behalten
+    description: 'Generationen-Backups: wie viele tägliche Backups behalten werden. Solange eine Generationen-Option gesetzt ist, zählt 0 als 1, das neueste Backup bleibt also immer.'
+  generational_weeks:
+    name: Wöchentliche Backups behalten
+    description: 'Generationen-Backups: wie viele wöchentliche Backups behalten werden.'
+  generational_months:
+    name: Monatliche Backups behalten
+    description: 'Generationen-Backups: wie viele monatliche Backups behalten werden.'
+  generational_years:
+    name: Jährliche Backups behalten
+    description: 'Generationen-Backups: wie viele jährliche Backups behalten werden.'
+  generational_day_of_year:
+    name: Tag für das Jahres-Backup
+    description: Tag des Jahres (1–365), dessen Backup als Jahres-Backup behalten wird.
+  generational_day_of_month:
+    name: Tag für das Monats-Backup
+    description: Tag des Monats (1–31), dessen Backup als Monats-Backup behalten wird.
+  generational_day_of_week:
+    name: Tag für das Wochen-Backup
+    description: Wochentag, dessen Backup als Wochen-Backup behalten wird.
+  generational_delete_early:
+    name: Überzählige Backups früh löschen
+    description: Überflüssige Backups entfernen, bevor die Obergrenze erreicht ist.
+  notify_for_stale_backups:
+    name: Bei veralteten Backups benachrichtigen
+    description: Eine dauerhafte Benachrichtigung senden, wenn keine Backups mehr erstellt werden, auch wenn sie pausieren, weil das Add-on von Proton abgemeldet ist.
+  enable_backup_stale_sensor:
+    name: Sensor für veraltete Backups
+    description: binary_sensor.backups_stale anlegen, der einschaltet, wenn Backups veraltet sind.
+  enable_backup_state_sensor:
+    name: Sensor für den Backup-Status
+    description: sensor.backup_state anlegen, der den Status deiner Backups meldet.
+  backup_password:
+    name: Backup-Passwort
+    description: 'Backups mit diesem Passwort verschlüsseln. Leer heißt kein Passwort. Bewahre es sicher auf: Zum Wiederherstellen wird es gebraucht.'
+  exclude_folders:
+    name: Ordner ausschließen
+    description: Kommagetrennte Ordner, die nicht mitgesichert werden, z. B. share,media. Damit werden Backups zu Teil-Backups.
+  exclude_addons:
+    name: Add-ons ausschließen
+    description: Kommagetrennte Add-on-Slugs, die nicht mitgesichert werden, z. B. core_mariadb. Damit werden Backups zu Teil-Backups.
+  exclude_ha_database:
+    name: Home-Assistant-Datenbank ausschließen
+    description: home-assistant_v2.db auslassen, damit Backups kleiner werden.
+  stop_addons:
+    name: Add-ons während des Backups stoppen
+    description: Kommagetrennte Add-on-Slugs, die vor einem Backup gestoppt und danach wieder gestartet werden (nützlich für Datenbanken).
+  expose_extra_server:
+    name: Zusätzlichen Webserver bereitstellen
+    description: Die Web-UI auch auf einem eigenen Port anbieten, außerhalb von Home Assistant Ingress. Schalte dazu „Home-Assistant-Anmeldung verlangen“ ein.
+  confirm_multiple_deletes:
+    name: Vor dem Löschen mehrerer Backups fragen
+    description: Anhalten und in der Web-UI nachfragen, bevor mehr als ein altes Backup auf einmal gelöscht wird.
+  enable_proton_upload:
+    name: Backups nach Proton Drive hochladen
+    description: Wenn aus, verwaltet das Add-on nur Backups in Home Assistant.
+  proton_folder_name:
+    name: Proton-Drive-Ordner
+    description: Ordner unter dem Hauptverzeichnis von Proton Drive, in dem Backups gespeichert werden. Mit / verschachtelst du Ordner, z. B. backups/ha. Nimm dafür einen eigenen Ordner.
+  proton_cli_path:
+    name: Pfad zur proton-drive-CLI
+    description: Pfad zur mitgelieferten Proton-Drive-CLI.
+  proton_data_path:
+    name: Proton-Datenpfad
+    description: Wo die CLI ihre Sitzung, ihren Schlüsselbund und temporäre Übertragungsdateien ablegt.
+  proton_drive_timeout_seconds:
+    name: CLI-Timeout
+    description: Sekunden, die auf Auflistungen und Metadaten-Abfragen gewartet wird.
+  proton_transfer_timeout_seconds:
+    name: Übertragungs-Timeout
+    description: Sekunden, die auf einen einzelnen Upload oder Download gewartet wird.
+  permanently_delete:
+    name: Entfernte Backups endgültig löschen
+    description: Gelöschte Backups auch aus dem Papierkorb von Proton Drive entfernen, damit sie nicht mehr auf dein Speicherkontingent zählen. Schalte das aus, um sie im Papierkorb wiederherstellbar zu halten.
+  delete_ignored_after_days:
+    name: Ignorierte Backups löschen nach
+    description: Tage, nach denen ignorierte Backups automatisch gelöscht werden. 0 behält sie für immer.
+  call_backup_snapshot:
+    name: Backups „Snapshots“ nennen
+    description: In Benachrichtigungen und Sensoren den älteren Begriff „Snapshot“ verwenden.
+  background_color:
+    name: Hintergrundfarbe
+    description: 'Hintergrundfarbe der Web-UI, als #RRGGBB. Leer nutzt den Standard.'
+  accent_color:
+    name: Akzentfarbe
+    description: 'Akzentfarbe der Web-UI, als #RRGGBB. Leer nutzt den Standard.'
+  max_sync_interval_seconds:
+    name: Max. Synchronisierungsintervall
+    description: So lange wartet das Add-on höchstens zwischen zwei Synchronisierungen, in Sekunden (mindestens 300).
+  default_sync_interval_variation:
+    name: Streuung des Synchronisierungsintervalls
+    description: Zufällige Streuung der regelmäßigen Synchronisierung, als Anteil (0–1) des maximalen Intervalls. Mit 0.5 und 3 Stunden liegen Synchronisierungen 1,5 bis 3 Stunden auseinander.
+  port:
+    name: Port des zusätzlichen Webservers
+    description: 'Port, auf dem der zusätzliche Webserver im Add-on lauscht. Standard: 8471.'
+  log_level:
+    name: Protokollstufe (Web-UI)
+    description: Wie ausführlich der Tab „Protokoll“ der Web-UI und Fehlerberichte sind.
+  console_log_level:
+    name: Protokollstufe (Konsole)
+    description: Wie ausführlich der Tab „Protokoll“ des Add-ons in Home Assistant ist.
+  max_backoff_seconds:
+    name: Max. Wartezeit zwischen Versuchen
+    description: Längste Wartezeit zwischen Versuchen nach einer fehlgeschlagenen Synchronisierung, in Sekunden (mindestens 3600).
+  ha_reporting_interval_seconds:
+    name: Aktualisierungsintervall der Sensoren
+    description: Wie oft das Add-on seine Sensoren in Home Assistant aktualisiert, in Sekunden.
+network:
+  8471/tcp: Zusätzlicher Webserver, außerhalb von Ingress (nur wenn „Zusätzlichen Webserver bereitstellen“ an ist).

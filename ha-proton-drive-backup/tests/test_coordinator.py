@@ -269,3 +269,40 @@ async def test_cancelled_upload_to_proton_rolls_back_pin(tmp_path):
     with pytest.raises(asyncio.CancelledError):
         await coord._uploadToProton("slug1")
     assert backup.getOptions() is None
+
+
+
+def test_next_sync_survives_huge_intervals():
+    # "Max sync interval" takes any number in the Configuration tab; past what
+    # a date can hold, nextSyncAttempt raised OverflowError.  The wait is
+    # capped at 100 years ("not on a schedule").
+    from datetime import datetime, timedelta, timezone
+    from backup.model.coordinator import LONGEST_SYNC_WAIT_SECONDS
+    from backup.util import Backoff
+    now = datetime(2026, 11, 21, tzinfo=timezone.utc)
+
+    class _Time:
+        def now(self):
+            return now
+
+    class _GlobalInfo:
+        def __init__(self):
+            self._last_error, self._last_failure_time, self._last_success = None, None, now
+
+    c = Coordinator.__new__(Coordinator)
+    c._config, c._time, c._global_info = Config(), _Time(), _GlobalInfo()
+    c._next_sync_offset = 0.5
+    c.nextBackupTime = lambda *args, **kwargs: None
+    c._config.override(Setting.MAX_SYNC_INTERVAL_SECONDS, 1e300)
+    assert c.nextSyncAttempt() == now + timedelta(seconds=LONGEST_SYNC_WAIT_SECONDS)
+    # The error backoff needs no cap of its own, whatever its maximum: Backoff
+    # never waits longer than 10 * 2**20 seconds.
+    c._backoff = Backoff(initial=0, base=10, max=10 ** 30)  # as Coordinator builds it
+    c._backoff.maxOut()
+    c._global_info._last_error, c._global_info._last_failure_time = "boom", now
+    assert c.nextSyncAttempt() == now + timedelta(seconds=10 * 2 ** 20)
+    # Normal values are unchanged.
+    c._global_info._last_error = None
+    c._config.override(Setting.MAX_SYNC_INTERVAL_SECONDS, 3600)
+    c._config.override(Setting.DEFAULT_SYNC_INTERVAL_VARIATION, 0)
+    assert c.nextSyncAttempt() == now + timedelta(hours=1)

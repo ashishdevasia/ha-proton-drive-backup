@@ -6,3 +6,5 @@ tests/
 pytest.ini
 devserver.py
 backup/static/app/mock.js
+# Read by the Supervisor from the repository, not from the image.
+translations/

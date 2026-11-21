@@ -1,6 +1,6 @@
 {
   "name": "Home Assistant Proton Drive Backup",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "slug": "hassio_proton_drive_backup",
   "description": "Automatically manage backups between Home Assistant and Proton Drive",
   "arch": ["aarch64", "amd64"],
@@ -29,7 +29,6 @@
 
     "delete_after_upload": "bool?",
     "delete_before_new_backup": "bool?",
-    "verbose": "bool?",
     "use_ssl": "bool?",
     "certfile": "str?",
     "keyfile": "str?",
@@ -37,7 +36,6 @@
 
     "backup_name": "str?",
     "backup_time_of_day": "match(^[0-2]\\d:[0-5]\\d$)?",
-    "specify_backup_folder": "bool?",
     "warn_for_low_space": "bool?",
     "watch_backup_directory": "bool?",
 
@@ -53,13 +51,11 @@
     "notify_for_stale_backups": "bool?",
     "enable_backup_stale_sensor": "bool?",
     "enable_backup_state_sensor": "bool?",
-    "send_error_reports": "bool?",
     "backup_password": "str?",
     "exclude_folders": "str?",
     "exclude_addons": "str?",
     "exclude_ha_database": "bool?",
     "stop_addons": "str?",
-    "disable_watchdog_when_stopping": "bool?",
     "expose_extra_server": "bool?",
     "confirm_multiple_deletes": "bool?",
 
@@ -83,10 +79,7 @@
     "console_log_level": "list(DEBUG|TRACE|INFO|WARN|CRITICAL|WARNING)?",
     "max_backoff_seconds": "int(3600,)?",
 
-    "maximum_upload_chunk_bytes": "float(262144,)?",
-    "ha_reporting_interval_seconds": "int(1,)?",
-
-    "upload_limit_bytes_per_second": "float(0,)?"
+    "ha_reporting_interval_seconds": "int(1,)?"
   },
   "ports": {
     "8471/tcp": null

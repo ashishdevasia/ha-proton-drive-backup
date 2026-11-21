@@ -399,6 +399,104 @@ async def test_saveconfig_rejects_malformed_bodies(body):
         assert resp.status == 400
 
 
+async def test_saveconfig_back_to_default_sticks():
+    # Setting log_level to "— default —" (the web UI leaves it out) or turning
+    # watch_backup_directory back on used to reach Supervisor but be undone in
+    # the add-on's own config, which the next save then sent back.
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from backup.config import Setting
+    ui = make_config_ui({Setting.LOG_LEVEL: "INFO", Setting.CONSOLE_LOG_LEVEL: "WARNING",
+                         Setting.WATCH_BACKUP_DIRECTORY: False})
+    ui.ignore_other_turned_on = False
+    supervisor = {}
+
+    class FakeHaRequests:
+        async def updateConfig(self, options):
+            supervisor.clear()
+            supervisor.update(options)
+
+    class FakeUpdater:
+        def triggerRefresh(self):
+            pass
+    ui._harequests, ui._haupdater = FakeHaRequests(), FakeUpdater()
+    app = web.Application()
+    app.router.add_post("/saveconfig", ui.saveconfig)
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.post("/saveconfig", json={"config": {
+            "days_between_backups": 3, "console_log_level": "TRACE", "watch_backup_directory": True}})
+        assert resp.status == 200
+    assert "log_level" not in supervisor and "watch_backup_directory" not in supervisor
+    assert supervisor["console_log_level"] == "TRACE"
+    assert ui.config.get(Setting.LOG_LEVEL) == Setting.LOG_LEVEL.default()
+    assert ui.config.get(Setting.WATCH_BACKUP_DIRECTORY) is True
+    assert ui.config.get(Setting.CONSOLE_LOG_LEVEL) == "TRACE"
+    # The next refresh from Supervisor keeps them.
+    ui.config.update(supervisor)
+    assert ui.config.get(Setting.LOG_LEVEL) == Setting.LOG_LEVEL.default()
+    assert ui.config.get(Setting.WATCH_BACKUP_DIRECTORY) is True
+
+
+async def test_saveconfig_checks_changed_values_against_the_limits():
+    # A changed value must be within NEW_INPUT_LIMITS: "12 hours" for "Delete
+    # ignored backups after" would delete ignored backups (by default, every
+    # backup the add-on didn't make) within hours.  The reply names the field
+    # for the web UI's message.  A value stored from the Configuration tab and
+    # sent back unchanged is kept, even beyond the limits.
+    import json
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from backup.config import Setting
+    ui = make_config_ui({Setting.DAYS_BETWEEN_BACKUPS: 0.05})
+    ui.ignore_other_turned_on = False
+    supervisor = {}
+
+    class FakeHaRequests:
+        async def updateConfig(self, options):
+            supervisor.clear()
+            supervisor.update(options)
+
+    class FakeUpdater:
+        def triggerRefresh(self):
+            pass
+    ui._harequests, ui._haupdater = FakeHaRequests(), FakeUpdater()
+    app = web.Application(middlewares=[ui.error_middleware])
+    app.router.add_post("/saveconfig", ui.saveconfig)
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.post("/saveconfig", json={"config": {
+            "days_between_backups": 0.05, "delete_ignored_after_days": "12 hours"}})
+        reply = json.loads(await resp.text())
+        assert reply["error_type"] == "illegal_config"
+        assert reply["data"] == {"key": "delete_ignored_after_days", "value": "12 hours"}
+        assert supervisor == {}
+        resp = await client.post("/saveconfig", json={"config": {
+            "days_between_backups": 0.05, "delete_ignored_after_days": "2 days"}})
+        assert resp.status == 200
+    assert supervisor["days_between_backups"] == 0.05 and supervisor["delete_ignored_after_days"] == 2
+
+
+async def test_proton_sign_in_and_out_failures_carry_the_error_type():
+    # The web UI translates these by error_type; 'message' stays in English
+    # for API scripts.
+    import json
+    from backup.proton.exceptions import ProtonConnectionError
+
+    class Unreachable:
+        async def signOut(self):
+            raise ProtonConnectionError()
+
+        async def startLogin(self):
+            raise ProtonConnectionError()
+    ui = make_config_ui()
+    ui._proton = ui._cli = Unreachable()
+    reply = json.loads((await ui.protonlogout(None)).text)
+    assert reply["ok"] is False and reply["error_type"] == "proton_cant_connect"
+    assert reply["message"].startswith("Couldn't sign out")
+    reply = json.loads((await ui.protonlogin(None)).text)
+    assert reply["ok"] is False and reply["error_type"] == "proton_cant_connect"
+    assert reply["message"] == ProtonConnectionError().message()
+
+
 def test_saveconfig_without_login_keeps_code_paths():
     # Every other add-on can reach the extra server: without login it mustn't
     # choose which program the add-on runs, or where that program's state is.
@@ -719,3 +817,141 @@ def test_colored_log_history_is_escaped():
     handler.emit(logging.LogRecord("t", logging.INFO, __file__, 1, "<img src=x onerror=alert(1)>", None, None))
     (_, line), = list(handler.getHistory(0, html=True))
     assert "<img" not in line and "&lt;img" in line
+
+
+# --- Status payload: dates the web UI localizes -------------------------------
+
+def _time_ui(zone="Europe/Paris"):
+    import pytz
+    from backup.time import Time
+    ui = UiServer.__new__(UiServer)
+    ui._time = Time(local_tz=pytz.timezone(zone))
+    return ui
+
+
+def test_time_fields_carry_an_epoch_timestamp():
+    from datetime import datetime, timezone
+    ui = _time_ui()
+    when = datetime(2026, 11, 18, 10, 30, tzinfo=timezone.utc)
+    fields = ui._timeFields("next_backup", when, "Disabled")
+    assert fields["next_backup_timestamp"] == when.timestamp() == 1794997800
+    # The English fields stay for API scripts; _detail is in the local zone.
+    assert fields["next_backup_machine"] == "2026-11-18T10:30:00Z"
+    assert "11:30:00" in fields["next_backup_detail"]
+    assert set(fields) == {"next_backup_text", "next_backup_machine", "next_backup_detail", "next_backup_timestamp"}
+
+
+def test_time_fields_without_a_date():
+    assert _time_ui()._timeFields("last_backup", None, "Never") == {
+        "last_backup_text": "Never", "last_backup_machine": "",
+        "last_backup_detail": "Never", "last_backup_timestamp": None,
+    }
+
+
+def test_zone_name_is_the_iana_name():
+    assert _time_ui("Europe/Paris")._zoneName() == "Europe/Paris"
+    assert _time_ui("UTC")._zoneName() == "UTC"
+
+
+def test_upload_info_carries_the_start_timestamp():
+    from datetime import datetime, timedelta, timezone
+    from backup.model.backups import Backup
+    from backup.time import Time
+    started = datetime(2026, 11, 18, 10, 0, tzinfo=timezone.utc)
+
+    class Source:
+        def progress(self):
+            return 42.0
+
+        def speed(self, period=timedelta(seconds=20)):
+            return 1000
+
+        def position(self):
+            return 2048
+
+        def startTime(self):
+            return started
+
+    backup = Backup()
+    backup.setUploadSource("Proton Drive", Source())
+    info = backup.getUploadInfo(Time())
+    assert info["started_timestamp"] == started.timestamp()
+    assert info["started"].endswith("ago")  # English text kept alongside
+
+
+def test_zone_name_for_other_tz_types():
+    # Production uses pytz, but the JS only needs an IANA name or nothing:
+    # None makes the browser fall back to its own zone.
+    import zoneinfo
+    from datetime import timedelta, timezone
+    import dateutil.tz
+    import pytz
+    ui = _time_ui()
+    for tz, expected in ((zoneinfo.ZoneInfo("Europe/Paris"), "Europe/Paris"),
+                         (dateutil.tz.gettz("Europe/Paris"), None),
+                         (timezone(timedelta(hours=2)), None),
+                         (pytz.FixedOffset(120), None)):
+        ui._time.local_tz = tz
+        assert ui._zoneName() == expected, tz
+
+
+def _getstatus_ui(now, next_backup, backups=()):
+    from types import SimpleNamespace as NS
+    import pytz
+    from backup.config import Config
+    from backup.time import Time
+
+    class FixedTime(Time):
+        def now(self):
+            return now
+
+        def nowLocal(self):
+            return now.astimezone(self.local_tz)
+
+    ui = UiServer.__new__(UiServer)
+    ui._time = FixedTime(local_tz=pytz.timezone("Europe/Paris"))
+    ui.config = Config()
+    ui.getBackupDetails = lambda backup: {"slug": backup.slug}
+    ui._coord = NS(backups=lambda: list(backups), nextBackupTime=lambda: next_backup,
+                   isSyncing=lambda: False, isWorkingThroughUpload=lambda: False,
+                   buildBackupMetrics=lambda: {}, isWaitingForStartup=lambda: False)
+    ui._ha_source = NS(getHomeAssistantUrl=lambda: "http://ha", getHostInfo=lambda: {})
+    ui._global_info = NS(_last_error=None, isErrorSuppressed=lambda: False, failureCount=lambda: 0,
+                         ignoreErrorsForNow=lambda: False, _first_sync=False)
+    ui._cli = NS(isAuthenticated=lambda: True, authWarning=lambda: None, loginInProgress=lambda: False,
+                 loginUrl=lambda: None, loginError=lambda: None)
+    ui._proton = NS(folderName=lambda: "Home Assistant Backups")
+    return ui
+
+
+async def test_status_clamps_an_overdue_next_backup_to_now():
+    from datetime import datetime, timedelta, timezone
+    now = datetime(2026, 11, 18, 10, 30, tzinfo=timezone.utc)
+    status = await _getstatus_ui(now, now - timedelta(hours=1)).buildStatusInfo()
+    assert status["now_timestamp"] == now.timestamp()
+    assert status["next_backup_timestamp"] == now.timestamp()
+    assert status["time_zone"] == "Europe/Paris"
+    # The English fields API scripts read are still there.
+    assert status["next_backup_machine"] == "2026-11-18T10:30:00Z"
+    assert status["next_backup_text"] and status["next_backup_detail"]
+
+
+async def test_status_without_a_schedule_or_backups():
+    from datetime import datetime, timezone
+    now = datetime(2026, 11, 18, 10, 30, tzinfo=timezone.utc)
+    status = await _getstatus_ui(now, None).buildStatusInfo()
+    assert (status["next_backup_text"], status["next_backup_timestamp"]) == ("Disabled", None)
+    assert (status["last_backup_text"], status["last_backup_timestamp"]) == ("Never", None)
+    assert status["backups"] == []
+
+
+async def test_status_last_backup_skips_ignored_backups():
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace as NS
+    now = datetime(2026, 11, 18, 10, 30, tzinfo=timezone.utc)
+    kept = NS(slug="a", date=lambda: now - timedelta(days=2), ignore=lambda: False)
+    ignored = NS(slug="b", date=lambda: now - timedelta(hours=1), ignore=lambda: True)
+    status = await _getstatus_ui(now, now + timedelta(days=1), [kept, ignored]).buildStatusInfo()
+    assert status["last_backup_timestamp"] == (now - timedelta(days=2)).timestamp()
+    assert status["next_backup_timestamp"] == (now + timedelta(days=1)).timestamp()
+    assert [b["slug"] for b in status["backups"]] == ["a", "b"]

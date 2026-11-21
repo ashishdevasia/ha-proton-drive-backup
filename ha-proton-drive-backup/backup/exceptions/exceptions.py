@@ -154,6 +154,10 @@ class InvalidConfigurationValue(KnownError):
     def code(self):
         return ERROR_INVALID_CONFIG
 
+    def data(self):
+        # The web UI names the setting by its label (error.illegal_config.message).
+        return {'key': str(self.key), 'value': str(self.current)}
+
 
 # UI Handler Done and updated
 

@@ -29,6 +29,8 @@ class UpgradeFlags(Enum):
     NOTIFIED_ABOUT_IGNORED_BACKUPS = "notified_ignored_backups"
     NOTIFIED_ABOUT_OOB_FLOW = "notified_about_oob_flow"
     NOTIFIED_ABOUT_STOPADDONS = "notified_stop_addons"
+    # HaSource._fixDeleteIgnoredSeconds has run (see HaSource._mustCheckDeleteIgnored).
+    FIXED_DELETE_IGNORED_SECONDS = "fixed_delete_ignored_seconds"
     TESTING_FLAG = "testing_flag"
 
 
