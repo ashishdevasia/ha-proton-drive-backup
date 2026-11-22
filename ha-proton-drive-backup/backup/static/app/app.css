@@ -1,13 +1,18 @@
 /* =========================================================================
    Proton Drive Backup — modern UI
    Dark-first glassmorphism, theme-driven, responsive & accessible.
+   A light background colour switches to the "Light theme" palette below.
    No external assets / no CDN. System font stack + inline SVG icons.
    ========================================================================= */
 
 :root {
-  /* --user-bg / --user-accent are injected by index.jinja2 from add-on config. */
+  /* --user-bg / --user-accent are injected by index.jinja2 from add-on config,
+     with --user-on-accent: dark or white text, whichever reads on the accent. */
   --accent: var(--user-accent, #1a5fb4);
   --bg-base: var(--user-bg, #0b1020);
+  --on-accent: var(--user-on-accent, #fff);
+  /* The accent as text or a thin line. The light palette darkens it. */
+  --accent-ink: var(--accent);
 
   /* A cohesive palette layered over the user background. */
   --bg-1: rgba(255, 255, 255, 0.03);
@@ -17,6 +22,7 @@
   --glass-strong: rgba(20, 26, 46, 0.85);
   --stroke: rgba(255, 255, 255, 0.09);
   --stroke-strong: rgba(255, 255, 255, 0.16);
+  --field: rgba(0, 0, 0, 0.25);
 
   --text: #eef1fb;
   --text-dim: #aab2cf;
@@ -32,6 +38,7 @@
   --bad-bg: rgba(255, 107, 129, 0.13);
   --info: #5cc8ff;
   --info-bg: rgba(92, 200, 255, 0.13);
+  --ha: #4fc3f7;
 
   --radius: 18px;
   --radius-sm: 12px;
@@ -79,7 +86,7 @@ img, svg, video, canvas { max-width: 100%; }
   body { background: radial-gradient(900px 900px at 50% 120%, rgba(92,200,255,.08), transparent 60%), var(--bg-base); }
 }
 
-a { color: var(--accent); }
+a { color: var(--accent-ink); }
 
 /* ---- Boot splash --------------------------------------------------------- */
 .boot {
@@ -119,7 +126,7 @@ a { color: var(--accent); }
   width: 34px; height: 34px; border-radius: 10px; display: grid; place-content: center;
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 40%, #5cc8ff));
   box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(255,255,255,.2);
-  color: #fff;
+  color: var(--on-accent);
 }
 .brand .logo svg { width: 20px; height: 20px; }
 .brand small { display: block; font-weight: 500; color: var(--text-faint); font-size: .72rem; }
@@ -139,7 +146,7 @@ a { color: var(--accent); }
   position: fixed; top: 0; left: 0; right: 0; z-index: 401;
   display: flex; align-items: center; justify-content: center; gap: 10px;
   padding: 8px 16px; font-size: .85rem; font-weight: 600;
-  color: #2a1115; background: var(--warn);
+  color: #2a1115; background: #ffc15e;
   box-shadow: var(--shadow-sm);
 }
 .offline-bar svg { width: 16px; height: 16px; }
@@ -170,7 +177,7 @@ a { color: var(--accent); }
 }
 .tab:hover { color: var(--text); }
 .tab[aria-selected="true"] {
-  color: #fff;
+  color: var(--on-accent);
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #5cc8ff));
   box-shadow: var(--shadow-sm);
 }
@@ -178,7 +185,7 @@ a { color: var(--accent); }
   font-size: .7rem; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
   display: inline-grid; place-content: center; background: var(--bg-3); color: var(--text);
 }
-.tab[aria-selected="true"] .badge { background: rgba(255,255,255,.25); color: #fff; }
+.tab[aria-selected="true"] .badge { background: rgba(255,255,255,.25); color: var(--on-accent); }
 
 /* ---- Cards / panels ------------------------------------------------------ */
 .card {
@@ -206,19 +213,19 @@ a { color: var(--accent); }
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid transparent; border-radius: var(--radius-sm);
   padding: 10px 16px; font: inherit; font-weight: 600; font-size: .9rem;
-  cursor: pointer; color: #fff; white-space: nowrap;
+  cursor: pointer; color: var(--on-accent); white-space: nowrap;
   background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #5cc8ff));
   box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(255,255,255,.14);
   transition: transform .12s ease, filter .12s ease, opacity .12s ease;
 }
 .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
 .btn:active { transform: translateY(0); }
-.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .btn.ghost { background: var(--bg-2); color: var(--text); border-color: var(--stroke); box-shadow: none; }
 .btn.ghost:hover { background: var(--bg-3); filter: none; }
 .btn.subtle { background: transparent; color: var(--text-dim); border-color: var(--stroke); box-shadow: none; }
 .btn.subtle:hover { color: var(--text); background: var(--bg-1); filter: none; }
-.btn.danger { background: linear-gradient(135deg, #ff6b81, #ff8a5c); }
+.btn.danger { color: #fff; background: linear-gradient(135deg, #ff6b81, #ff8a5c); }
 .btn.sm { padding: 7px 12px; font-size: .82rem; border-radius: 10px; }
 .btn.icon { padding: 8px; width: 36px; height: 36px; }
 .btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; filter: none; }
@@ -250,7 +257,7 @@ a { color: var(--accent); }
 .dest { display: flex; align-items: center; gap: 14px; padding: 16px; border-radius: var(--radius-sm); background: var(--bg-1); border: 1px solid var(--stroke); }
 .dest .badge-ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-content: center; flex: 0 0 auto; }
 .dest .badge-ico svg { width: 22px; height: 22px; }
-.dest .ha { background: rgba(3,169,244,.16); color: #4fc3f7; }
+.dest .ha { background: rgba(3,169,244,.16); color: var(--ha); }
 .dest .proton { background: color-mix(in srgb, var(--accent) 22%, transparent); color: color-mix(in srgb, var(--accent) 80%, #fff); }
 .dest .name { font-weight: 700; }
 .dest .meta { font-size: .82rem; color: var(--text-dim); }
@@ -277,7 +284,7 @@ a { color: var(--accent); }
 .banner.info { border-color: color-mix(in srgb, var(--info) 45%, transparent); }
 .banner.info .b-ico { color: var(--info); }
 .banner.live { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
-.banner.live .b-ico { color: var(--accent); }
+.banner.live .b-ico { color: var(--accent-ink); }
 
 /* live shimmer strip for sync/activity banners */
 .activity-strip { position: relative; height: 4px; border-radius: 4px; overflow: hidden; background: var(--bg-3); margin-top: 12px; }
@@ -304,14 +311,14 @@ a { color: var(--accent); }
 .backup-sub { font-size: .83rem; color: var(--text-dim); margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px 14px; }
 .backup-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .backup-note { margin-top: 10px; font-size: .85rem; color: var(--text-dim); display: flex; gap: 8px; align-items: center; }
-.backup-note .q { color: var(--accent); }
+.backup-note .q { color: var(--accent-ink); }
 .backup-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; }
 .backup-menu { position: relative; margin-left: auto; }
 
 /* upload progress */
 .upload { margin-top: 14px; padding: 14px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--accent) 8%, var(--bg-2)); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
 .upload .u-head { display: flex; justify-content: space-between; font-size: .82rem; margin-bottom: 8px; }
-.upload .u-head b { color: var(--accent); }
+.upload .u-head b { color: var(--accent-ink); }
 .bar { height: 10px; border-radius: var(--radius-pill); background: var(--bg-3); overflow: hidden; position: relative; }
 .bar > i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), #5cc8ff); transition: width .6s ease; position: relative; }
 .bar > i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,.4), transparent); animation: shimmer 1.6s linear infinite; }
@@ -323,7 +330,7 @@ a { color: var(--accent); }
 /* ---- Source location chips ---------------------------------------------- */
 .loc { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-pill); font-size: .76rem; font-weight: 600; border: 1px solid var(--stroke); background: var(--bg-2); }
 .loc svg { width: 13px; height: 13px; }
-.loc.ha { color: #4fc3f7; }
+.loc.ha { color: var(--ha); }
 .loc.proton { color: color-mix(in srgb, var(--accent) 82%, #fff); }
 .loc .tag { font-size: .66rem; padding: 1px 6px; border-radius: 6px; background: var(--bg-3); color: var(--text-dim); }
 
@@ -338,11 +345,11 @@ a { color: var(--accent); }
 .field .help { font-size: .82rem; color: var(--text-faint); margin: 2px 0 8px; }
 input[type=text], input[type=number], input[type=password], input[type=time], select, textarea {
   width: 100%; padding: 11px 13px; font: inherit; color: var(--text);
-  background: var(--bg-base); background: rgba(0,0,0,.25);
+  background: var(--field);
   border: 1px solid var(--stroke-strong); border-radius: var(--radius-sm); outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
-input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+input:focus, select:focus, textarea:focus { border-color: var(--accent-ink); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
 textarea { resize: vertical; min-height: 76px; font-family: var(--mono); font-size: .85rem; }
 select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23aab2cf' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px; padding-right: 38px; }
 
@@ -353,7 +360,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .switch .track::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .18s ease; box-shadow: var(--shadow-sm); }
 .switch input:checked + .track { background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #5cc8ff)); border-color: transparent; }
 .switch input:checked + .track::after { transform: translateX(20px); }
-.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent-ink); outline-offset: 2px; }
 .switch .switch-label { font-size: .9rem; }
 
 .checks { display: grid; gap: 8px; }
@@ -477,6 +484,59 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 .menu button.danger { color: var(--bad); }
 .menu hr { border: 0; border-top: 1px solid var(--stroke); margin: 6px 4px; }
 .menu svg { width: 16px; height: 16px; opacity: .85; }
+
+/* ---- Light theme ----------------------------------------------------------
+   index.jinja2 sets data-theme="light" when the configured background colour
+   is light (backup/theme.py). The same variables as :root, for dark text. */
+:root[data-theme="light"] {
+  --bg-1: rgba(0, 0, 0, 0.03);
+  --bg-2: rgba(0, 0, 0, 0.05);
+  --bg-3: rgba(0, 0, 0, 0.09);
+  --glass: rgba(255, 255, 255, 0.68);
+  --glass-strong: rgba(255, 255, 255, 0.92);
+  --stroke: rgba(0, 0, 0, 0.1);
+  --stroke-strong: rgba(0, 0, 0, 0.2);
+  --field: rgba(255, 255, 255, 0.7);
+  /* A pale accent can't be seen on a light surface. */
+  --accent-ink: color-mix(in srgb, var(--accent) 50%, #000);
+
+  --text: #141826;
+  --text-dim: #3f465c;
+  --text-faint: #535a70;
+
+  /* Darker than the dark theme's so they clear WCAG AA (4.5:1) as text on
+     their own tints over a light card. */
+  --ok: #06603f;
+  --ok-bg: rgba(6, 96, 63, 0.12);
+  --warn: #7a4800;
+  --warn-bg: rgba(122, 72, 0, 0.12);
+  --bad: #b0162f;
+  --bad-bg: rgba(176, 22, 47, 0.12);
+  --info: #0a5a92;
+  --info-bg: rgba(10, 90, 146, 0.12);
+  --ha: #02639c;
+
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.14);
+  --shadow-sm: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+/* The dark theme lightens the accent for the text of these chips. */
+:root[data-theme="light"] :is(.sync-chip.live, .pill.accent, .dest .proton, .loc.proton) { color: var(--accent-ink); }
+:root[data-theme="light"] :is(.log-view, .login-link) { background: var(--bg-2); }
+:root[data-theme="light"] select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%233f465c' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); }
+/* The dev-only mock panel keeps its dark look. */
+:root[data-theme="light"] .mock-bar { --text: #eef1fb; --warn: #ffc15e; --bg-2: rgba(255, 255, 255, 0.05); --stroke: rgba(255, 255, 255, 0.09); }
+
+/* ---- Without color-mix ---------------------------------------------------
+   A declaration that mixes a var() into color-mix() is not dropped by a
+   browser that lacks color-mix: it still wins the cascade and then computes
+   to nothing. So these come after the rules they repair: the accent gradients
+   get the plain accent (their text would otherwise sit on no background),
+   and the light theme's accent ink becomes the text colour. */
+@supports not (background: color-mix(in srgb, red, blue)) {
+  .brand .logo, .tab[aria-selected="true"], .btn, .switch input:checked + .track { background: var(--accent); }
+  :root[data-theme="light"] { --accent-ink: var(--text); }
+}
 
 /* ---- Mobile --------------------------------------------------------------- */
 @media (max-width: 560px) {

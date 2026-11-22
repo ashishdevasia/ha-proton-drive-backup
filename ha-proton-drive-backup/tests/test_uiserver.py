@@ -437,6 +437,39 @@ async def test_saveconfig_back_to_default_sticks():
     assert ui.config.get(Setting.WATCH_BACKUP_DIRECTORY) is True
 
 
+@pytest.mark.parametrize("change, reload_page", [
+    ({"background_color": "#ead9c5"}, True),
+    ({"accent_color": "#e0b030"}, True),
+    ({"enable_proton_upload": False}, True),
+    # Unchanged colours, and settings the page doesn't render, need no reload.
+    ({"background_color": "#0b1020", "accent_color": "", "days_between_backups": 5}, False),
+])
+async def test_saveconfig_reloads_the_page_when_a_rendered_setting_changes(change, reload_page):
+    # The colours (and the light/dark palette that follows from them) are
+    # rendered into the page by the server; without a reload a saved colour
+    # showed no effect until the user refreshed.
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from backup.config import Setting
+    ui = make_config_ui({Setting.BACKGROUND_COLOR: "#0b1020"})
+    ui.ignore_other_turned_on = False
+
+    class FakeHaRequests:
+        async def updateConfig(self, options):
+            pass
+
+    class FakeUpdater:
+        def triggerRefresh(self):
+            pass
+    ui._harequests, ui._haupdater = FakeHaRequests(), FakeUpdater()
+    app = web.Application()
+    app.router.add_post("/saveconfig", ui.saveconfig)
+    async with TestClient(TestServer(app)) as client:
+        resp = await client.post("/saveconfig", json={"config": dict({"background_color": "#0b1020"}, **change)})
+        assert resp.status == 200
+        assert (await resp.json())["reload_page"] is reload_page
+
+
 async def test_saveconfig_checks_changed_values_against_the_limits():
     # A changed value must be within NEW_INPUT_LIMITS: "12 hours" for "Delete
     # ignored backups after" would delete ignored backups (by default, every

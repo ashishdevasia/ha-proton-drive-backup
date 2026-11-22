@@ -18,14 +18,21 @@ straight to one:  http://localhost:8099/?mock=1&scenario=uploading
 Scenarios: normal, many, empty, syncing, uploading, pending, signed-out,
 login-pending, cooldown, error-auth, error-multiple-deletes, error-low-space,
 please-wait.
+
+Preview the theme settings with ``bg`` and ``accent`` (RRGGBB, without the #):
+http://localhost:8099/?mock=1&bg=f4ead9&accent=e0b030
 """
 import os
+import re
 import sys
 import http.server
 import socketserver
 from functools import partial
+from urllib.parse import parse_qs, urlsplit
 
 import jinja2
+
+from backup.theme import themeContext
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "backup", "static")
@@ -34,13 +41,21 @@ VERSION = "dev"
 _env = jinja2.Environment(loader=jinja2.FileSystemLoader(STATIC), autoescape=True)
 
 
-def render_index() -> bytes:
+def _color(query: dict, name: str) -> str:
+    # The value is inlined into a <style> block, so only a plain hex colour may
+    # pass. Anything else is the empty default, as in the add-on's settings.
+    value = query.get(name, [""])[0]
+    return "#" + value if re.fullmatch(r"[0-9a-fA-F]{6}", value) else ""
+
+
+def render_index(background: str = "", accent: str = "") -> bytes:
     html = _env.get_template("index.jinja2").render(
         version=VERSION,
-        backgroundColor="",   # empty -> UI defaults kick in
-        accentColor="",
+        backgroundColor=background,   # empty -> UI defaults kick in
+        accentColor=accent,
         coordEnabled=True,
         devMock=True,         # load mock.js so ?mock=1 works in the dev preview
+        **themeContext(background, accent),
     )
     return html.encode("utf-8")
 
@@ -49,7 +64,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 (http.server API)
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index", "/index.html"):
-            body = render_index()
+            query = parse_qs(urlsplit(self.path).query)
+            body = render_index(_color(query, "bg"), _color(query, "accent"))
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))

@@ -38,6 +38,11 @@ icon font, no npm). Just edit the files — there is nothing to compile.
   references them via the injected `{{ version }}`.
 - Theme: `background_color` / `accent_color` from the add-on config are inlined
   into CSS variables (`--user-bg` / `--user-accent`) with sensible defaults.
+  There is no light/dark setting: `backup/theme.py` measures the two colours,
+  and `index.jinja2` sets `data-theme="light"` for a light background (the
+  light palette is the "Light theme" section of `app.css`) and `--user-on-accent` to
+  dark text for a light accent. New colours belong in a variable that both
+  palettes define. Preview with `devserver.py`: `?mock=1&bg=f4ead9&accent=e0b030`.
 
 ## Proton specifics
 
