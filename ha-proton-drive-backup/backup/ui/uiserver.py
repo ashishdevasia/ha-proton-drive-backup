@@ -31,6 +31,7 @@ from backup.logger import getLogger, getHistory, TraceLogger
 from backup.debugworker import DebugWorker
 from backup.proton import ProtonSource, ProtonCli
 from backup.proton.exceptions import ProtonNotAuthenticated, ProtonConnectionError
+from backup.theme import themeContext
 from .debug import Debug
 
 logger = getLogger(__name__)
@@ -117,11 +118,14 @@ class UiServer(Trigger, Startable):
         return "UI Server"
 
     def base_context(self):
+        background = self.config.get(Setting.BACKGROUND_COLOR)
+        accent = self.config.get(Setting.ACCENT_COLOR)
         return {
             'version': VERSION,
-            'backgroundColor': self.config.get(Setting.BACKGROUND_COLOR),
-            'accentColor': self.config.get(Setting.ACCENT_COLOR),
+            'backgroundColor': background,
+            'accentColor': accent,
             'coordEnabled': self._coord.enabled(),
+            **themeContext(background, accent),
         }
 
     # --- Status ----------------------------------------------------------------
@@ -504,7 +508,7 @@ class UiServer(Trigger, Startable):
 
     async def _updateConfiguration(self, new_config, trigger=True):
         update = {key.key(): new_config[key] for key in new_config}
-        old_proton_option = self.config.get(Setting.ENABLE_PROTON_UPLOAD)
+        old_page_settings = self._pageSettings()
         old_ignore_others_option = self.config.get(Setting.IGNORE_OTHER_BACKUPS)
         await self._harequests.updateConfig(update)
         self.config.update(new_config)
@@ -516,8 +520,14 @@ class UiServer(Trigger, Startable):
         return {
             'message': 'Settings saved',
             'warning': self._generationalCapWarning(),
-            'reload_page': self.config.get(Setting.ENABLE_PROTON_UPLOAD) != old_proton_option
+            'reload_page': self._pageSettings() != old_page_settings
         }
+
+    def _pageSettings(self):
+        # The page only reads these when it loads (the colours are rendered
+        # into index.jinja2), so the web UI reloads itself when one changes.
+        return [self.config.get(setting) for setting in (
+            Setting.ENABLE_PROTON_UPLOAD, Setting.BACKGROUND_COLOR, Setting.ACCENT_COLOR)]
 
     def _generationalCapWarning(self):
         slots = self.config.generationalSlotCount()

@@ -1379,6 +1379,22 @@
       .catch(function (e) { toast(errText(e, "settings.load_failed"), "bad"); });
   }
 
+  // A save that reloads the page (reload_page: the colours, for one) should
+  // come back to Settings, not the dashboard. The note is only good for a few
+  // seconds, so a reload that never came back doesn't redirect a later visit.
+  // sessionStorage throws where storage is blocked; the dashboard is fine then.
+  var RETURN_KEY = "protonDriveBackup.returnToSettings";
+  function returnToSettings() {
+    try { sessionStorage.setItem(RETURN_KEY, String(Date.now())); } catch (e) {}
+  }
+  function returningToSettings() {
+    try {
+      var since = Date.now() - Number(sessionStorage.getItem(RETURN_KEY));
+      sessionStorage.removeItem(RETURN_KEY);
+      return since >= 0 && since < 30000;
+    } catch (e) { return false; }
+  }
+
   function collectConfig() {
     var out = {};
     // The backend replaces every option on save, so start from the saved
@@ -1429,7 +1445,7 @@
       // (generationalWarningText) from the values just saved.
       if (d && d.warning) toast(generationalWarningText() || d.warning, "warn", 12000);
       state.configDraft = {};   // edits are now persisted server-side
-      if (d && d.reload_page) { setTimeout(function () { location.reload(); }, 600); return; }
+      if (d && d.reload_page) { returnToSettings(); setTimeout(function () { location.reload(); }, 600); return; }
       loadConfig();
       scheduleRefresh(400);
     }).catch(function (e) {
@@ -1855,6 +1871,7 @@
   function boot() {
     I18n.load(function (code) { return u("/static/" + VERSION + "/app/locales/" + code + ".json"); }).then(function () {
       var boot = el(".boot p"); if (boot) boot.textContent = t("boot.loading");
+      if (returningToSettings()) { state.tab = "settings"; loadConfig(); }
       refresh();
     }, function () {
       // Not even English loaded, so there's nothing to translate with. Keep
