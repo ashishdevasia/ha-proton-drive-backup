@@ -66,7 +66,7 @@ class DestinationPrecache(Worker, Precache):
     def getNextWarmDate(self):
         warm_date = self._coord.nextSyncAttempt() - timedelta(seconds=self._config.get(Setting.CACHE_WARMUP_MAX_SECONDS) * self._offset)
         if self._last_error:
-            return max(warm_date, self._last_error + timedelta(self._config.get(Setting.CACHE_WARMUP_ERROR_TIMEOUT_SECONDS)))
+            return max(warm_date, self._last_error + timedelta(seconds=self._config.get(Setting.CACHE_WARMUP_ERROR_TIMEOUT_SECONDS)))
         return warm_date
 
     def cached(self, source: str, date: datetime) -> Any:

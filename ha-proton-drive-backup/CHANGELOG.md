@@ -1,3 +1,29 @@
+## v0.4.0 [2026-11-23]
+
+- Translated into German, Spanish, French, Italian, Dutch, Polish, Brazilian Portuguese and Malayalam: the web UI
+  and the Configuration tab follow your Home Assistant language. Most translations haven't been checked by a native
+  speaker yet; corrections are welcome (see the README)
+- The Configuration tab shows readable names and descriptions instead of raw option keys
+- The web UI shows dates and times in your language and in Home Assistant's time zone
+- The web UI is readable with a light "Background color": it switches to dark text on light cards. Text on
+  buttons turns dark when the "Accent color" is light
+- Fixed: a plain number in the web UI's "Delete ignored backups after" counted as seconds, not days, so backups the
+  add-on didn't make could be deleted seconds after they appeared
+- Fixed: "Days between backups" under 1 with a time of day set made a backup on every sync; with a time of day it's
+  now rounded up to whole days
+- Fixed: very large values in the time settings (e.g. `9999` yearly backups) could stop every sync; the web UI now
+  checks the values you change
+- Fixed: changes to the log levels or "Watch the backup directory for changes" could be silently undone
+- Fixed: a "Background color" or "Accent color" saved in the web UI only showed after you reloaded the page
+- Removed options that had no effect: `verbose`, `send_error_reports`, `specify_backup_folder`,
+  `disable_watchdog_when_stopping`, `maximum_upload_chunk_bytes` and `upload_limit_bytes_per_second`
+- Removed an unused dependency
+- Bug-fixes
+
+**Breaking:** a plain number in the web UI's "Delete ignored backups after" now means days, not seconds. On its
+  first start the add-on corrects a value that looks saved as seconds (`30` becomes 30 days), or asks you once, in
+  a notification, to check it.
+
 ## v0.3.0 [2026-11-02]
 
 - Security fix: the bundled Proton Drive CLI no longer trusts the compromised eMudhra root certificates

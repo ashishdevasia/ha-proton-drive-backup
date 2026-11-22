@@ -52,6 +52,17 @@ session is stored in a keyring under `/data` and survives restarts and upgrades.
 See [AUTHENTICATION.md](AUTHENTICATION.md) for details on how the headless
 secret service works.
 
+## Translations
+
+The Web UI and the Configuration tab are available in English, German, Spanish,
+French, Italian, Dutch, Polish, Brazilian Portuguese and Malayalam.
+
+**Help wanted:** most of these translations haven't been checked by a native
+speaker yet. If you speak one of these languages, please look through the app and
+[open an issue](https://github.com/ashishdevasia/ha-proton-drive-backup/issues) or a pull request for anything that reads wrong or
+unnatural. Translations into other languages are welcome too; the steps are in
+[the Web UI's README](backup/static/app/README.md#translations).
+
 ## Configuration
 
 The options mirror the original app. The Proton-specific ones are:

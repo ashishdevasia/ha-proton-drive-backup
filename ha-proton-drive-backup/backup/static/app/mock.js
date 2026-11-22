@@ -12,14 +12,17 @@
   if (!/[?&]mock=1/.test(location.search)) return;
 
   var scenario = "normal";
+  // Epoch seconds relative to page load, so the UI's localized dates read
+  // naturally ("8 hours ago", "in 2 days") whenever the mock is opened.
+  var NOW = Math.floor(Date.now() / 1000), HOUR = 3600, DAY = 86400;
 
   function backup(over) {
     return Object.assign({
       name: "Full Backup 2026-06-28", slug: "b76660e7", size: "1.4 GB",
-      date: "Sat Jun 28 02:51:38 2026", createdAt: "8 hours ago", timestamp: 1782010298,
+      date: "Sat Jun 28 02:51:38 2026", createdAt: "8 hours ago", timestamp: NOW - 8 * HOUR,
       type: "full", haVersion: "2026.6.0", protected: true, isPending: false,
       uploadable: false, restorable: true, ignored: false, note: null,
-      status: "Backed up", status_detail: null, upload_info: {}, folders: [], addons: [],
+      status: "Backed Up", status_detail: null, upload_info: {}, folders: [], addons: [],
       sources: [
         // Per-source size is raw bytes from the backend (unlike the formatted
         // backup-level size string); the UI formats it with fmtBytes().
@@ -33,7 +36,7 @@
     backup(),
     backup({
       name: "Full Backup 2026-06-25", slug: "a1234567", size: "1.3 GB",
-      date: "Wed Jun 25 02:00:00 2026", createdAt: "3 days ago", timestamp: 1781748000,
+      date: "Wed Jun 25 02:00:00 2026", createdAt: "3 days ago", timestamp: NOW - 3 * DAY,
       note: "before upgrade", protected: false,
       sources: [
         { name: "HomeAssistant", key: "HomeAssistant", size: "1.3 GB", retained: false, ignored: false, delete_next: true, slug: "a1234567" },
@@ -42,7 +45,7 @@
     }),
     backup({
       name: "Partial Backup 2026-06-20", slug: "deadbeef", size: "220 MB",
-      date: "Fri Jun 20 14:10:00 2026", createdAt: "8 days ago", timestamp: 1781316600,
+      date: "Fri Jun 20 14:10:00 2026", createdAt: "8 days ago", timestamp: NOW - 8 * DAY,
       type: "partial", uploadable: true,
       sources: [
         { name: "HomeAssistant", key: "HomeAssistant", size: "220 MB", retained: false, ignored: false, delete_next: false, slug: "deadbeef" }
@@ -62,8 +65,9 @@
       backups: baseBackups.map(function (b) { return JSON.parse(JSON.stringify(b)); }),
       ha_url_base: "http://homeassistant.local:8123",
       ask_error_reports: false,
-      next_backup_text: "in 2 days", next_backup_machine: "2026-06-30T02:00:00", next_backup_detail: "Mon Jun 30 02:00:00 2026",
-      last_backup_text: "8 hours ago", last_backup_machine: "2026-06-28T02:51:38", last_backup_detail: "Sat Jun 28 02:51:38 2026",
+      next_backup_text: "2 days", next_backup_machine: "2026-06-30T02:00:00Z", next_backup_detail: "Mon Jun 30 02:00:00 2026", next_backup_timestamp: NOW + 2 * DAY,
+      last_backup_text: "8 hours ago", last_backup_machine: "2026-06-28T02:51:38Z", last_backup_detail: "Sat Jun 28 02:51:38 2026", last_backup_timestamp: NOW - 8 * HOUR,
+      time_zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       last_error: null, last_error_count: 0, ignore_errors_for_now: false,
       syncing: false, ignore_sync_error: false, firstSync: false,
       backup_name_template: "Full Backup {year}-{month}-{day} {hr24}:{min}:{sec}",
@@ -79,7 +83,7 @@
     var s = base();
     switch (scenario) {
       case "empty":
-        s.backups = []; s.sources = sources(0, 0); s.last_backup_text = "Never"; s.last_backup_detail = "Never";
+        s.backups = []; s.sources = sources(0, 0); s.last_backup_text = "Never"; s.last_backup_detail = "Never"; s.last_backup_timestamp = null;
         break;
       case "many":
         s.backups = [];
@@ -87,7 +91,7 @@
           var both = i % 3 !== 0;
           s.backups.push(backup({
             name: "Full Backup 2026-06-" + String(28 - i).padStart(2, "0"), slug: "slug" + i,
-            date: "Day " + i, createdAt: i + " days ago", timestamp: 1782010298 - i * 86400,
+            date: "Day " + i, createdAt: i + " days ago", timestamp: NOW - 8 * HOUR - i * DAY,
             type: i % 4 === 0 ? "partial" : "full", note: i === 2 ? "monthly keep" : null,
             uploadable: !both, protected: i % 2 === 0,
             sources: both ? backup().sources : [{ name: "HomeAssistant", key: "HomeAssistant", size: "1.1 GB", retained: false, ignored: false, delete_next: i > 8, slug: "slug" + i }]
@@ -105,8 +109,8 @@
         // Real backend returns raw numbers: progress=float percent,
         // total=bytes transferred, speed=bytes/sec. The UI formats these.
         var pos = 30603026.479154732 + (Date.now() / 50 % 5000000);
-        s.backups[2].status = "Uploading";
-        s.backups[2].upload_info = { name: "Proton Drive", progress: 100 * pos / 587202560, speed: 3250000 + (Date.now() / 100 % 400000), total: pos, started: "2 minutes ago" };
+        s.backups[2].status = "Uploading to Proton Drive";
+        s.backups[2].upload_info = { name: "Proton Drive", progress: 100 * pos / 587202560, speed: 3250000 + (Date.now() / 100 % 400000), total: pos, started: "2 minutes ago", started_timestamp: NOW - 2 * 60 };
         break;
       case "uploading-cli":
         // The opaque proton-drive CLI phase: progress pinned at 100, "speed"
@@ -114,13 +118,13 @@
         // state, not a frozen 100% + bad speed.
         s.syncing = true;
         s.backups[2].uploadable = false;
-        s.backups[2].status = "Uploading";
+        s.backups[2].status = "Uploading to Proton Drive";
         s.backups[2].status_detail = "Uploading to Proton Drive";
-        s.backups[2].upload_info = { name: "Proton Drive", progress: 100, speed: 587202560 / (((Date.now() / 1000) % 240) + 4), total: 587202560, started: "3 minutes ago" };
+        s.backups[2].upload_info = { name: "Proton Drive", progress: 100, speed: 587202560 / (((Date.now() / 1000) % 240) + 4), total: 587202560, started: "3 minutes ago", started_timestamp: NOW - 3 * 60 };
         break;
       case "pending":
         s.syncing = true;
-        s.backups.unshift(backup({ name: "Full Backup (in progress)", slug: "pending1", size: "—", date: "just now", createdAt: "just now", isPending: true, restorable: false, status: "Creating", sources: [{ name: "HomeAssistant", key: "HomeAssistant", size: "—", retained: false, ignored: false, delete_next: false, slug: "pending1" }] }));
+        s.backups.unshift(backup({ name: "Full Backup (in progress)", slug: "pending1", size: "—", date: "just now", createdAt: "just now", timestamp: NOW, isPending: true, restorable: false, status: "Pending", sources: [{ name: "HomeAssistant", key: "HomeAssistant", size: "—", retained: false, ignored: false, delete_next: false, slug: "pending1" }] }));
         break;
       case "signed-out":
         s.proton_authenticated = false;
@@ -182,25 +186,25 @@
     handle: function (path, opts) {
       var clean = path.split("?")[0];
       switch (clean) {
-        case "/getstatus": return ok(status());
+        case "/getstatus": return ok(Object.assign(status(), { now_timestamp: Date.now() / 1000 }));
         case "/getconfig": return ok({
           config: {
             days_between_backups: 3, backup_time_of_day: "02:00", max_backups_in_ha: 4, max_backups_in_proton_drive: 4,
             backup_name: "Full Backup {year}-{month}-{day} {hr24}:{min}:{sec}", backup_password: "",
             delete_before_new_backup: false, call_backup_snapshot: false,
             enable_proton_upload: true, proton_folder_name: "Home Assistant Backups", delete_after_upload: false, permanently_delete: true,
-            upload_limit_bytes_per_second: "", proton_drive_timeout_seconds: 120, proton_transfer_timeout_seconds: 3600,
+            proton_drive_timeout_seconds: 120, proton_transfer_timeout_seconds: 3600,
             exclude_folders: "", exclude_addons: "", exclude_ha_database: false,
             generational_days: 0, generational_weeks: 0, generational_months: 0, generational_years: 0,
             generational_day_of_week: "mon", generational_day_of_month: 1, generational_day_of_year: 1, generational_delete_early: false,
-            stop_addons: "", disable_watchdog_when_stopping: false,
-            notify_for_stale_backups: true, enable_backup_stale_sensor: true, enable_backup_state_sensor: true, send_error_reports: false,
+            stop_addons: "",
+            notify_for_stale_backups: true, enable_backup_stale_sensor: true, enable_backup_state_sensor: true,
             ignore_other_backups: false, ignore_upgrade_backups: false, delete_ignored_after_days: "",
             background_color: "", accent_color: "", expose_extra_server: false, require_login: false, use_ssl: false,
             certfile: "fullchain.pem", keyfile: "privkey.pem", port: 1627,
-            confirm_multiple_deletes: true, warn_for_low_space: true, watch_backup_directory: true, verbose: false,
+            confirm_multiple_deletes: true, warn_for_low_space: true, watch_backup_directory: true,
             log_level: "INFO", console_log_level: "INFO", proton_cli_path: "proton-drive", proton_data_path: "/data/proton",
-            max_sync_interval_seconds: "1 hour", maximum_upload_chunk_bytes: "10 MB"
+            max_sync_interval_seconds: "1 hour"
           },
           defaults: {
             days_between_backups: 3, max_backups_in_ha: 4, max_backups_in_proton_drive: 4, accent_color: "#1a5fb4",

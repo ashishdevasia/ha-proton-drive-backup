@@ -9,7 +9,6 @@ from .regexvalidator import RegexValidator
 from .stringvalidator import StringValidator
 from .listvalidator import ListValidator
 from .durationasstringvalidator import DurationAsStringValidator
-from .bytesizeasstringvalidator import BytesizeAsStringValidator
 from ..logger import getLogger
 
 logger = getLogger(__name__)
@@ -18,7 +17,6 @@ logger = getLogger(__name__)
 @unique
 class Setting(Enum):
     MAX_BACKUPS_IN_HA = "max_backups_in_ha"
-    MAX_BACKUPS_IN_GOOGLE_DRIVE = "max_backups_in_google_drive"
     DAYS_BETWEEN_BACKUPS = "days_between_backups"
     IGNORE_OTHER_BACKUPS = "ignore_other_backups"
     IGNORE_UPGRADE_BACKUPS = "ignore_upgrade_backups"
@@ -26,7 +24,6 @@ class Setting(Enum):
     DELETE_BEFORE_NEW_BACKUP = "delete_before_new_backup"
     BACKUP_NAME = "backup_name"
     BACKUP_TIME_OF_DAY = "backup_time_of_day"
-    SPECIFY_BACKUP_FOLDER = "specify_backup_folder"
     NOTIFY_FOR_STALE_BACKUPS = "notify_for_stale_backups"
     ENABLE_BACKUP_STALE_SENSOR = "enable_backup_stale_sensor"
     ENABLE_BACKUP_STATE_SENSOR = "enable_backup_state_sensor"
@@ -55,7 +52,6 @@ class Setting(Enum):
     EXCLUDE_HA_DATABASE = "exclude_ha_database"
 
     STOP_ADDONS = "stop_addons"
-    DISABLE_WATCHDOG_WHEN_STOPPING = "disable_watchdog_when_stopping"
 
     # UI Server Options
     USE_SSL = "use_ssl"
@@ -67,10 +63,7 @@ class Setting(Enum):
     EXPOSE_EXTRA_SERVER = "expose_extra_server"
 
     # Add-on options
-    VERBOSE = "verbose"
-    SEND_ERROR_REPORTS = "send_error_reports"
     CONFIRM_MULTIPLE_DELETES = "confirm_multiple_deletes"
-    ENABLE_DRIVE_UPLOAD = "enable_drive_upload"
     WATCH_BACKUP_DIRECTORY = "watch_backup_directory"
     TRACE_REQUESTS = "trace_requests"
 
@@ -79,20 +72,10 @@ class Setting(Enum):
     ACCENT_COLOR = "accent_color"
 
     # Network and dns stuff
-    DRIVE_EXPERIMENTAL = "drive_experimental"
     DRIVE_IPV4 = "drive_ipv4"
-    IGNORE_IPV6_ADDRESSES = "ignore_ipv6_addresses"
-    GOOGLE_DRIVE_TIMEOUT_SECONDS = "google_drive_timeout_seconds"
-    GOOGLE_DRIVE_PAGE_SIZE = "google_drive_page_size"
     ALTERNATE_DNS_SERVERS = "alternate_dns_servers"
-    DEFAULT_DRIVE_CLIENT_ID = "default_drive_client_id"
-    DEFAULT_DRIVE_CLIENT_SECRET = "default_drive_client_secret"
-    DRIVE_PICKER_API_KEY = "drive_picker_api_key"
-    MAXIMUM_UPLOAD_CHUNK_BYTES = "maximum_upload_chunk_bytes"
 
     # Files and folders
-    FOLDER_FILE_PATH = "folder_file_path"
-    CREDENTIALS_FILE_PATH = "credentials_file_path"
     RETAINED_FILE_PATH = "retained_file_path"
     SECRETS_FILE_PATH = "secrets_file_path"
     BACKUP_DIRECTORY_PATH = "backup_directory_path"
@@ -102,17 +85,9 @@ class Setting(Enum):
     DATA_CACHE_FILE_PATH = "data_cache_file_path"
 
     # endpoints
-    AUTHORIZATION_HOST = "authorization_host"
-    TOKEN_SERVER_HOSTS = "token_server_hosts"
     SUPERVISOR_URL = "supervisor_url"
-    DRIVE_URL = "drive_url"
     SUPERVISOR_TOKEN = "hassio_header"
     DRIVE_HOST_NAME = "drive_host_name"
-    DRIVE_REFRESH_URL = "drive_refresh_url"
-    DRIVE_AUTHORIZE_URL = "drive_authorize_url"
-    DRIVE_DEVICE_CODE_URL = "drive_device_code_url"
-    DRIVE_TOKEN_URL = "drive_token_url"
-    SAVE_DRIVE_CREDS_PATH = "save_drive_creds_path"
     STOP_ADDON_STATE_PATH = "stop_addon_state_path"
 
     # Timing and timeouts
@@ -125,14 +100,11 @@ class Setting(Enum):
     DOWNLOAD_TIMEOUT_SECONDS = "download_timeout_seconds"
     DEFAULT_CHUNK_SIZE = "default_chunk_size"
     DEBUGGER_PORT = "debugger_port"
-    SERVER_PROJECT_ID = "server_project_id"
     LOG_LEVEL = "log_level"
     CONSOLE_LOG_LEVEL = "console_log_level"
     BACKUP_STARTUP_DELAY_MINUTES = "backup_startup_delay_minutes"
-    EXCHANGER_TIMEOUT_SECONDS = "exchanger_timeout_seconds"
     HA_REPORTING_INTERVAL_SECONDS = "ha_reporting_interval_seconds"
     LONG_TERM_STALE_BACKUP_SECONDS = "long_term_stale_backup_seconds"
-    PING_TIMEOUT = "ping_timeout"
     CACHE_WARMUP_MAX_SECONDS = "cache_warmup_max_seconds"
     CACHE_WARMUP_ERROR_TIMEOUT_SECONDS = "cache_warmup_error_timeout"
     MAX_BACKOFF_SECONDS = "max_backoff_seconds"
@@ -149,24 +121,18 @@ class Setting(Enum):
 
     # Old, deprecated settings
     DEPRECTAED_MAX_BACKUPS_IN_HA = "max_snapshots_in_hassio"
-    DEPRECTAED_MAX_BACKUPS_IN_GOOGLE_DRIVE = "max_snapshots_in_google_drive"
     DEPRECATED_DAYS_BETWEEN_BACKUPS = "days_between_snapshots"
     DEPRECTAED_IGNORE_OTHER_BACKUPS = "ignore_other_snapshots"
     DEPRECTAED_IGNORE_UPGRADE_BACKUPS = "ignore_upgrade_snapshots"
     DEPRECTAED_BACKUP_NAME = "snapshot_name"
     DEPRECTAED_BACKUP_TIME_OF_DAY = "snapshot_time_of_day"
     DEPRECATED_BACKUP_PASSWORD = "snapshot_password"
-    DEPRECTAED_SPECIFY_BACKUP_FOLDER = "specify_snapshot_folder"
     DEPRECTAED_DELETE_BEFORE_NEW_BACKUP = "delete_before_new_snapshot"
     DEPRECTAED_NOTIFY_FOR_STALE_BACKUPS = "notify_for_stale_snapshots"
     DEPRECTAED_ENABLE_BACKUP_STALE_SENSOR = "enable_snapshot_stale_sensor"
     DEPRECTAED_ENABLE_BACKUP_STATE_SENSOR = "enable_snapshot_state_sensor"
 
-    UPLOAD_LIMIT_BYTES_PER_SECOND = "upload_limit_bytes_per_second"
-
     def default(self):
-        if "staging" in VERSION and self in _STAGING_DEFAULTS:
-            return _STAGING_DEFAULTS[self]
         return _DEFAULTS[self]
 
     def validator(self):
@@ -189,7 +155,6 @@ _DEFAULTS = {
     # the old move-to-trash-only behavior (recoverable, but quota grows).
     Setting.PERMANENTLY_DELETE: True,
     Setting.MAX_BACKUPS_IN_HA: 4,
-    Setting.MAX_BACKUPS_IN_GOOGLE_DRIVE: 4,
     Setting.DAYS_BETWEEN_BACKUPS: 3,
     # Defaulted to True (the original add-on uses False) so the add-on never
     # counts, purges, or uploads backups it didn't create.  Combined with
@@ -201,7 +166,6 @@ _DEFAULTS = {
     Setting.DELETE_BEFORE_NEW_BACKUP: False,
     Setting.BACKUP_NAME: "{type} Backup {year}-{month}-{day} {hr24}:{min}:{sec}",
     Setting.BACKUP_TIME_OF_DAY: "",
-    Setting.SPECIFY_BACKUP_FOLDER: False,
     Setting.NOTIFY_FOR_STALE_BACKUPS: True,
     Setting.ENABLE_BACKUP_STALE_SENSOR: True,
     Setting.ENABLE_BACKUP_STATE_SENSOR: True,
@@ -212,14 +176,12 @@ _DEFAULTS = {
 
     # Basic backup settings
     Setting.DEPRECTAED_MAX_BACKUPS_IN_HA: 4,
-    Setting.DEPRECTAED_MAX_BACKUPS_IN_GOOGLE_DRIVE: 4,
     Setting.DEPRECATED_DAYS_BETWEEN_BACKUPS: 3,
     Setting.DEPRECTAED_IGNORE_OTHER_BACKUPS: False,
     Setting.DEPRECTAED_IGNORE_UPGRADE_BACKUPS: False,
     Setting.DEPRECTAED_BACKUP_TIME_OF_DAY: "",
     Setting.DEPRECTAED_BACKUP_NAME: "{type} Snapshot {year}-{month}-{day} {hr24}:{min}:{sec}",
     Setting.DEPRECATED_BACKUP_PASSWORD: "",
-    Setting.DEPRECTAED_SPECIFY_BACKUP_FOLDER: False,
     Setting.WARN_FOR_LOW_SPACE: True,
     Setting.LOW_SPACE_THRESHOLD: 1024 * 1024 * 1024,
     Setting.DELETE_AFTER_UPLOAD: False,
@@ -243,7 +205,6 @@ _DEFAULTS = {
     Setting.EXCLUDE_HA_DATABASE: False,
 
     Setting.STOP_ADDONS: "",
-    Setting.DISABLE_WATCHDOG_WHEN_STOPPING: False,
 
     # UI Server settings
     Setting.USE_SSL: False,
@@ -258,10 +219,7 @@ _DEFAULTS = {
     Setting.DEPRECTAED_NOTIFY_FOR_STALE_BACKUPS: True,
     Setting.DEPRECTAED_ENABLE_BACKUP_STALE_SENSOR: True,
     Setting.DEPRECTAED_ENABLE_BACKUP_STATE_SENSOR: True,
-    Setting.SEND_ERROR_REPORTS: False,
-    Setting.VERBOSE: False,
     Setting.CONFIRM_MULTIPLE_DELETES: True,
-    Setting.ENABLE_DRIVE_UPLOAD: True,
 
     # Theme Settings
     Setting.BACKGROUND_COLOR: "",
@@ -269,33 +227,16 @@ _DEFAULTS = {
 
     # Network and DNS settings
     Setting.ALTERNATE_DNS_SERVERS: "8.8.8.8,8.8.4.4",
-    Setting.DRIVE_EXPERIMENTAL: False,
     Setting.DRIVE_IPV4: "",
-    Setting.IGNORE_IPV6_ADDRESSES: False,
-    Setting.GOOGLE_DRIVE_TIMEOUT_SECONDS: 180,
-    Setting.GOOGLE_DRIVE_PAGE_SIZE: 100,
-    Setting.MAXIMUM_UPLOAD_CHUNK_BYTES: 10 * 1024 * 1024,
 
-    # Remote endpoints.  This fork's backend is the local proton-drive CLI, so
-    # the upstream Google Drive / habackup.io token-server endpoints are unused
-    # (the code paths that called them are gone).  The settings remain so the
-    # (dead) Google-era plumbing still imports, but they're blanked so no
-    # third-party hostnames are baked into the image or shown to users.
-    Setting.AUTHORIZATION_HOST: "",
-    Setting.TOKEN_SERVER_HOSTS: "",
+    # Remote endpoints, blank by default.  This fork's backend is the local
+    # proton-drive CLI, so no Google Drive or habackup.io hostnames are baked
+    # into the image or shown to users.
     Setting.SUPERVISOR_URL: "",
     Setting.SUPERVISOR_TOKEN: "",
-    Setting.DRIVE_URL: "",
-    Setting.DRIVE_REFRESH_URL: "",
-    Setting.DRIVE_AUTHORIZE_URL: "",
-    Setting.DRIVE_DEVICE_CODE_URL: "",
-    Setting.DRIVE_TOKEN_URL: "",
     Setting.DRIVE_HOST_NAME: "",
-    Setting.SAVE_DRIVE_CREDS_PATH: "token",
 
     # File locations used to store things
-    Setting.FOLDER_FILE_PATH: "/data/folder.dat",
-    Setting.CREDENTIALS_FILE_PATH: "/data/credentials.dat",
     Setting.BACKUP_DIRECTORY_PATH: "/backup",
     Setting.RETAINED_FILE_PATH: "/data/retained.json",
     Setting.SECRETS_FILE_PATH: "/config/secrets.yaml",
@@ -312,39 +253,21 @@ _DEFAULTS = {
     Setting.NEW_BACKUP_TIMEOUT_SECONDS: 5,
     Setting.MAX_SYNC_INTERVAL_SECONDS: 60 * 60 * 3,  # 3 hours
     Setting.DEFAULT_SYNC_INTERVAL_VARIATION: 0.5,  # intermittent checkup syncs happen between 1.5 and 3 hours since the last one, randomly
-    # Blanked: this fork's backend is the local proton-drive CLI, so no Google
-    # OAuth client is used.  The setting is kept (vestigial Google-era plumbing
-    # still imports it) but carries no baked-in third-party identifier.
-    Setting.DEFAULT_DRIVE_CLIENT_ID: "",
-    Setting.DEFAULT_DRIVE_CLIENT_SECRET: "",
-    Setting.DRIVE_PICKER_API_KEY: "",
     Setting.DEFAULT_CHUNK_SIZE: 1024 * 1024 * 5,
     Setting.DOWNLOAD_TIMEOUT_SECONDS: 60,
     Setting.DEBUGGER_PORT: None,
-    Setting.SERVER_PROJECT_ID: "",
     Setting.LOG_LEVEL: 'DEBUG',
     Setting.CONSOLE_LOG_LEVEL: 'INFO',
     Setting.BACKUP_STARTUP_DELAY_MINUTES: 10,
-    Setting.EXCHANGER_TIMEOUT_SECONDS: 10,
     Setting.HA_REPORTING_INTERVAL_SECONDS: 10,
     Setting.LONG_TERM_STALE_BACKUP_SECONDS: 60 * 60 * 24,
-    Setting.PING_TIMEOUT: 5,
     Setting.CACHE_WARMUP_MAX_SECONDS: 15 * 60,  # 30 minutes
     Setting.CACHE_WARMUP_ERROR_TIMEOUT_SECONDS: 24 * 60 * 60,  # 1 day
     Setting.MAX_BACKOFF_SECONDS: 60 * 60 * 2,  # 2 hours
-
-    Setting.UPLOAD_LIMIT_BYTES_PER_SECOND: 0,
-}
-
-_STAGING_DEFAULTS = {
-    Setting.AUTHORIZATION_HOST: "https://dev.habackup.io",
-    Setting.TOKEN_SERVER_HOSTS: "https://token1.dev.habackup.io,https://dev.habackup.io",
-    Setting.DEFAULT_DRIVE_CLIENT_ID: "",
 }
 
 _CONFIG = {
     Setting.MAX_BACKUPS_IN_HA: "int(0,)?",
-    Setting.MAX_BACKUPS_IN_GOOGLE_DRIVE: "int(0,)?",
     Setting.DAYS_BETWEEN_BACKUPS: "float(0,)?",
     Setting.IGNORE_OTHER_BACKUPS: "bool?",
     Setting.IGNORE_UPGRADE_BACKUPS: "bool?",
@@ -352,7 +275,6 @@ _CONFIG = {
     Setting.DELETE_BEFORE_NEW_BACKUP: "bool?",
     Setting.BACKUP_NAME: "str?",
     Setting.BACKUP_TIME_OF_DAY: "match(^[0-2]\\d:[0-5]\\d$)?",
-    Setting.SPECIFY_BACKUP_FOLDER: "bool?",
     Setting.NOTIFY_FOR_STALE_BACKUPS: "bool?",
     Setting.ENABLE_BACKUP_STALE_SENSOR: "bool?",
     Setting.ENABLE_BACKUP_STATE_SENSOR: "bool?",
@@ -363,14 +285,12 @@ _CONFIG = {
 
     # Basic backup settings
     Setting.DEPRECTAED_MAX_BACKUPS_IN_HA: "int(0,)?",
-    Setting.DEPRECTAED_MAX_BACKUPS_IN_GOOGLE_DRIVE: "int(0,)?",
     Setting.DEPRECATED_DAYS_BETWEEN_BACKUPS: "float(0,)?",
     Setting.DEPRECTAED_IGNORE_OTHER_BACKUPS: "bool?",
     Setting.DEPRECTAED_IGNORE_UPGRADE_BACKUPS: "bool?",
     Setting.DEPRECTAED_BACKUP_TIME_OF_DAY: "match(^[0-2]\\d:[0-5]\\d$)?",
     Setting.DEPRECTAED_BACKUP_NAME: "str?",
     Setting.DEPRECATED_BACKUP_PASSWORD: "str?",
-    Setting.DEPRECTAED_SPECIFY_BACKUP_FOLDER: "bool?",
     Setting.WARN_FOR_LOW_SPACE: "bool?",
     Setting.LOW_SPACE_THRESHOLD: "int(0,)?",
     Setting.DELETE_AFTER_UPLOAD: "bool?",
@@ -393,7 +313,6 @@ _CONFIG = {
     Setting.EXCLUDE_HA_DATABASE: "bool?",
 
     Setting.STOP_ADDONS: "str?",
-    Setting.DISABLE_WATCHDOG_WHEN_STOPPING: "bool?",
 
     # UI Server settings
     Setting.USE_SSL: "bool?",
@@ -408,10 +327,7 @@ _CONFIG = {
     Setting.DEPRECTAED_NOTIFY_FOR_STALE_BACKUPS: "bool?",
     Setting.DEPRECTAED_ENABLE_BACKUP_STALE_SENSOR: "bool?",
     Setting.DEPRECTAED_ENABLE_BACKUP_STATE_SENSOR: "bool?",
-    Setting.SEND_ERROR_REPORTS: "bool?",
-    Setting.VERBOSE: "bool?",
     Setting.CONFIRM_MULTIPLE_DELETES: "bool?",
-    Setting.ENABLE_DRIVE_UPLOAD: "bool?",
 
     # Theme Settings
     Setting.BACKGROUND_COLOR: "match(^(#[0-9ABCDEFabcdef]{6}|)$)?",
@@ -419,29 +335,14 @@ _CONFIG = {
 
     # Network and DNS settings
     Setting.ALTERNATE_DNS_SERVERS: "match(^([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})(,[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})*$)?",
-    Setting.DRIVE_EXPERIMENTAL: "bool?",
     Setting.DRIVE_IPV4: "match(^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$)?",
-    Setting.IGNORE_IPV6_ADDRESSES: "bool?",
-    Setting.GOOGLE_DRIVE_TIMEOUT_SECONDS: "float(1,)?",
-    Setting.GOOGLE_DRIVE_PAGE_SIZE: "int(1,)?",
-    Setting.MAXIMUM_UPLOAD_CHUNK_BYTES: f"float({1024 * 256},)?",
 
     # Remote endpoints
-    Setting.AUTHORIZATION_HOST: "url?",
-    Setting.TOKEN_SERVER_HOSTS: "str?",
     Setting.SUPERVISOR_URL: "url?",
     Setting.SUPERVISOR_TOKEN: "str?",
-    Setting.DRIVE_URL: "url?",
-    Setting.DRIVE_REFRESH_URL: "url?",
-    Setting.DRIVE_AUTHORIZE_URL: "url?",
-    Setting.DRIVE_DEVICE_CODE_URL: "url?",
-    Setting.DRIVE_TOKEN_URL: "url?",
     Setting.DRIVE_HOST_NAME: "str?",
-    Setting.SAVE_DRIVE_CREDS_PATH: "str?",
 
     # File locations used to store things
-    Setting.FOLDER_FILE_PATH: "str?",
-    Setting.CREDENTIALS_FILE_PATH: "str?",
     Setting.BACKUP_DIRECTORY_PATH: "str?",
     Setting.RETAINED_FILE_PATH: "str?",
     Setting.SECRETS_FILE_PATH: "str?",
@@ -458,20 +359,14 @@ _CONFIG = {
     Setting.NEW_BACKUP_TIMEOUT_SECONDS: "float(0,)?",
     Setting.MAX_SYNC_INTERVAL_SECONDS: "float(300,)?",
     Setting.DEFAULT_SYNC_INTERVAL_VARIATION: "float(0,1)?",
-    Setting.DEFAULT_DRIVE_CLIENT_ID: "str?",
-    Setting.DEFAULT_DRIVE_CLIENT_SECRET: "str?",
-    Setting.DRIVE_PICKER_API_KEY: "str?",
     Setting.DEFAULT_CHUNK_SIZE: "int(1,)?",
     Setting.DOWNLOAD_TIMEOUT_SECONDS: "float(0,)?",
     Setting.DEBUGGER_PORT: "int(100,)?",
-    Setting.SERVER_PROJECT_ID: "str?",
     Setting.LOG_LEVEL: "list(DEBUG|TRACE|INFO|WARN|CRITICAL|WARNING)?",
     Setting.CONSOLE_LOG_LEVEL: "list(DEBUG|TRACE|INFO|WARN|CRITICAL|WARNING)?",
     Setting.BACKUP_STARTUP_DELAY_MINUTES: "float(0,)?",
-    Setting.EXCHANGER_TIMEOUT_SECONDS: "float(0,)?",
     Setting.HA_REPORTING_INTERVAL_SECONDS: "int(1,)?",
     Setting.LONG_TERM_STALE_BACKUP_SECONDS: "int(1,)?",
-    Setting.PING_TIMEOUT: "float(0,)?",
     Setting.CACHE_WARMUP_MAX_SECONDS: "float(0,)",
     Setting.CACHE_WARMUP_ERROR_TIMEOUT_SECONDS: "float(0,)",
     Setting.MAX_BACKOFF_SECONDS: "int(3600,)?",
@@ -484,8 +379,6 @@ _CONFIG = {
     Setting.PROTON_DRIVE_TIMEOUT_SECONDS: "float(1,)?",
     Setting.PROTON_TRANSFER_TIMEOUT_SECONDS: "float(1,)?",
     Setting.PERMANENTLY_DELETE: "bool?",
-
-    Setting.UPLOAD_LIMIT_BYTES_PER_SECOND: "float(0,)?",
 }
 
 PRIVATE = [
@@ -557,20 +450,64 @@ for setting in Setting:
 for key in addon_config["schema"]:
     _VALIDATORS[_LOOKUP[key]] = getValidator(key, addon_config["schema"][key])
 
-_VALIDATORS[Setting.MAX_SYNC_INTERVAL_SECONDS] = DurationAsStringValidator(Setting.MAX_SYNC_INTERVAL_SECONDS.value, minimum=1, maximum=None)
+# config.json's minimum, so the web UI's save fails here with a clear message
+# instead of Supervisor refusing the whole options update.
+_VALIDATORS[Setting.MAX_SYNC_INTERVAL_SECONDS] = DurationAsStringValidator(Setting.MAX_SYNC_INTERVAL_SECONDS.value, minimum=300, maximum=None)
 _VALIDATORS[Setting.HA_REPORTING_INTERVAL_SECONDS] = DurationAsStringValidator(Setting.HA_REPORTING_INTERVAL_SECONDS.value, minimum=1, maximum=None)
 _VALIDATORS[Setting.DELETE_IGNORED_AFTER_DAYS] = DurationAsStringValidator(Setting.DELETE_IGNORED_AFTER_DAYS.value, minimum=0, maximum=None, base_seconds=60 * 60 * 24, default_as_empty=0)
-_VALIDATORS[Setting.MAXIMUM_UPLOAD_CHUNK_BYTES] = BytesizeAsStringValidator(Setting.MAXIMUM_UPLOAD_CHUNK_BYTES.value, minimum=256 * 1024)
 _VALIDATORS[Setting.PENDING_BACKUP_TIMEOUT_SECONDS] = DurationAsStringValidator(Setting.PENDING_BACKUP_TIMEOUT_SECONDS.value, minimum=1, maximum=None)
-_VALIDATORS[Setting.UPLOAD_LIMIT_BYTES_PER_SECOND] = BytesizeAsStringValidator(Setting.UPLOAD_LIMIT_BYTES_PER_SECOND.value, minimum=0)
 VERSION = addon_config["version"]
 
-# The exact set of option keys this add-on declares in config.json.  Anything
-# written back to Supervisor's `addons/self/options` MUST be limited to these:
-# Supervisor validates the whole options payload against this schema and rejects
-# the entire update if it contains an undeclared key.  Several Settings are kept
-# in memory (e.g. the vestigial MAX_BACKUPS_IN_GOOGLE_DRIVE forced in by
-# Config.ALWAYS_KEEP) but are not user options and must never be persisted.
+
+class NewInputLimit:
+    """
+    The range for a value changed in the web UI or through /saveconfig
+    (Config.validate(strict=True)): narrower than config.json's schema.  The
+    schema isn't narrowed, since Supervisor refuses to start an add-on whose
+    saved options don't fit it.  So a value set in the Configuration tab can
+    still be anything the schema allows: the code that uses each setting copes
+    with that, and the web UI can save such a value again unchanged.
+    """
+
+    def __init__(self, minimum, maximum, off=None, whole=False):
+        self.minimum = minimum
+        self.maximum = maximum
+        self.off = off  # also allowed: the value that turns the setting off
+        self.whole = whole
+
+    def allows(self, value) -> bool:
+        if self.off is not None and value == self.off:
+            return True
+        if self.whole and value != int(value):
+            return False
+        return self.minimum <= value <= self.maximum
+
+
+NEW_INPUT_LIMITS = {
+    # 0 = no scheduled backups.  0.1 was the web UI's smallest step; less makes
+    # a backup every few minutes.
+    Setting.DAYS_BETWEEN_BACKUPS: NewInputLimit(0.1, 36500, off=0),
+    # 0 = never.  Less than a day deletes ignored backups (by default, every
+    # backup the add-on didn't make) within hours, as when the web UI read "30"
+    # as seconds.  999999999 days is the longest duration Python can hold.
+    Setting.DELETE_IGNORED_AFTER_DAYS: NewInputLimit(1, 999999999, off=0),
+    # Ten years of days or weeks, a hundred years of months or years: beyond
+    # that, every purge took seconds to minutes to work out which to keep.
+    Setting.GENERATIONAL_DAYS: NewInputLimit(0, 3650),
+    Setting.GENERATIONAL_WEEKS: NewInputLimit(0, 520),
+    Setting.GENERATIONAL_MONTHS: NewInputLimit(0, 1200),
+    Setting.GENERATIONAL_YEARS: NewInputLimit(0, 100),
+    Setting.MAX_SYNC_INTERVAL_SECONDS: NewInputLimit(300, 30 * 24 * 60 * 60),
+    # config.json says int: Supervisor would save 1.5 as 1.
+    Setting.HA_REPORTING_INTERVAL_SECONDS: NewInputLimit(1, 24 * 60 * 60, whole=True),
+}
+
+# The exact set of option keys this add-on declares in config.json.  Only these
+# are written back to Supervisor's `addons/self/options`: Supervisor drops any
+# other key, with a warning in its log.  Config.validate() can also return
+# internal Settings (those in Config.NON_UI_SETTING that aren't in config.json,
+# once they differ from their default); they are not user options and are never
+# persisted.
 ADDON_OPTION_KEYS = frozenset(addon_config["schema"].keys())
 
 

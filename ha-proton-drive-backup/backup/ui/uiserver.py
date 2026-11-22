@@ -31,6 +31,7 @@ from backup.logger import getLogger, getHistory, TraceLogger
 from backup.debugworker import DebugWorker
 from backup.proton import ProtonSource, ProtonCli
 from backup.proton.exceptions import ProtonNotAuthenticated, ProtonConnectionError
+from backup.theme import themeContext
 from .debug import Debug
 
 logger = getLogger(__name__)
@@ -117,11 +118,14 @@ class UiServer(Trigger, Startable):
         return "UI Server"
 
     def base_context(self):
+        background = self.config.get(Setting.BACKGROUND_COLOR)
+        accent = self.config.get(Setting.ACCENT_COLOR)
         return {
             'version': VERSION,
-            'backgroundColor': self.config.get(Setting.BACKGROUND_COLOR),
-            'accentColor': self.config.get(Setting.ACCENT_COLOR),
+            'backgroundColor': background,
+            'accentColor': accent,
             'coordEnabled': self._coord.enabled(),
+            **themeContext(background, accent),
         }
 
     # --- Status ----------------------------------------------------------------
@@ -134,28 +138,14 @@ class UiServer(Trigger, Startable):
         status['backups'] = [self.getBackupDetails(b) for b in self._coord.backups()]
         status['ha_url_base'] = self._ha_source.getHomeAssistantUrl()
         next = self._coord.nextBackupTime()
-        if next is None:
-            status['next_backup_text'] = "Disabled"
-            status['next_backup_machine'] = ""
-            status['next_backup_detail'] = "Disabled"
-        elif next < self._time.now():
-            status['next_backup_text'] = self._time.formatDelta(self._time.now())
-            status['next_backup_machine'] = self._time.asRfc3339String(self._time.now())
-            status['next_backup_detail'] = self._time.toLocal(self._time.now()).strftime("%c")
-        else:
-            status['next_backup_text'] = self._time.formatDelta(next)
-            status['next_backup_machine'] = self._time.asRfc3339String(next)
-            status['next_backup_detail'] = self._time.toLocal(next).strftime("%c")
+        if next is not None and next < self._time.now():
+            next = self._time.now()
+        status.update(self._timeFields('next_backup', next, "Disabled"))
         not_ignored = list(filter(lambda s: not s.ignore(), self._coord.backups()))
-        if len(not_ignored) > 0:
-            latest = not_ignored[-1].date()
-            status['last_backup_text'] = self._time.formatDelta(latest)
-            status['last_backup_machine'] = self._time.asRfc3339String(latest)
-            status['last_backup_detail'] = self._time.toLocal(latest).strftime("%c")
-        else:
-            status['last_backup_text'] = "Never"
-            status['last_backup_machine'] = ""
-            status['last_backup_detail'] = "Never"
+        latest = not_ignored[-1].date() if not_ignored else None
+        status.update(self._timeFields('last_backup', latest, "Never"))
+        status['time_zone'] = self._zoneName()
+        status['now_timestamp'] = self._time.now().timestamp()
 
         status['last_error'] = None
         if self._global_info._last_error is not None and self._global_info.isErrorSuppressed():
@@ -180,6 +170,28 @@ class UiServer(Trigger, Startable):
             name_keys[key] = BACKUP_NAME_KEYS[key]("Full", self._time.now(), self._ha_source.getHostInfo())
         status['backup_name_keys'] = name_keys
         return status
+
+    def _timeFields(self, prefix, when, empty):
+        """The <prefix>_text/_machine/_detail/_timestamp fields for one date.
+
+        _text and _detail are English, for API scripts and older UIs.  The web UI
+        renders _timestamp (epoch seconds, None when there's no date) itself, in
+        the viewer's language and Home Assistant's time zone (see time_zone).
+        """
+        if when is None:
+            return {prefix + '_text': empty, prefix + '_machine': "",
+                    prefix + '_detail': empty, prefix + '_timestamp': None}
+        return {
+            prefix + '_text': self._time.formatDelta(when),
+            prefix + '_machine': self._time.asRfc3339String(when),
+            prefix + '_detail': self._time.toLocal(when).strftime("%c"),
+            prefix + '_timestamp': when.timestamp(),
+        }
+
+    def _zoneName(self):
+        """IANA name of the add-on's local time zone (e.g. "Europe/Paris"), or None."""
+        tz = self._time.local_tz
+        return getattr(tz, "zone", None) or getattr(tz, "key", None)
 
     def getBackupDetails(self, backup: Backup):
         ha = backup.getSource(SOURCE_HA)
@@ -258,12 +270,18 @@ class UiServer(Trigger, Startable):
             'message': message,
         })
 
+    @staticmethod
+    def _failedReply(e: KnownError) -> Dict[str, Any]:
+        # 'message' stays for API scripts; the web UI translates by error_type
+        # (errText), as it does for other errors.
+        return {'ok': False, 'message': e.message(), 'error_type': e.code(), 'data': e.data()}
+
     async def protonlogin(self, request: Request):
         """Start an interactive Proton sign-in and return the link to open."""
         try:
             url = await self._cli.startLogin()
         except KnownError as e:
-            return web.json_response({'ok': False, 'message': e.message()})
+            return web.json_response(self._failedReply(e))
         except Exception as e:
             logger.printException(e)
             return web.json_response({'ok': False, 'message': str(e)})
@@ -283,14 +301,13 @@ class UiServer(Trigger, Startable):
         """Sign out of Proton Drive."""
         try:
             await self._proton.signOut()
-        except ProtonConnectionError:
-            return web.json_response({
-                'ok': False,
-                'message': "Couldn't sign out: Proton Drive is unreachable "
-                           "(network problem). Try again once you're back online.",
-            })
+        except ProtonConnectionError as e:
+            # The web UI words this one for signing out (logout.unreachable).
+            return web.json_response(dict(self._failedReply(e), message=(
+                "Couldn't sign out: Proton Drive is unreachable "
+                "(network problem). Try again once you're back online.")))
         except KnownError as e:
-            return web.json_response({'ok': False, 'message': e.message()})
+            return web.json_response(self._failedReply(e))
         self._coord.trigger()
         return web.json_response({'ok': True, 'message': "Signed out of Proton Drive."})
 
@@ -480,7 +497,7 @@ class UiServer(Trigger, Startable):
             raise web.HTTPBadRequest(reason="config must be an object")
         update = self._uiConfigUpdate(submitted, request.app.get(UNAUTHENTICATED, False))
         Password(self.config.getConfigFor(update)).resolve()
-        validated, needUpdate = self.config.validate(update)
+        validated, needUpdate = self.config.validate(update, strict=True)
         message = await self._updateConfiguration(validated, trigger=False)
         try:
             await self.cancelSync(request)
@@ -491,7 +508,7 @@ class UiServer(Trigger, Startable):
 
     async def _updateConfiguration(self, new_config, trigger=True):
         update = {key.key(): new_config[key] for key in new_config}
-        old_proton_option = self.config.get(Setting.ENABLE_PROTON_UPLOAD)
+        old_page_settings = self._pageSettings()
         old_ignore_others_option = self.config.get(Setting.IGNORE_OTHER_BACKUPS)
         await self._harequests.updateConfig(update)
         self.config.update(new_config)
@@ -503,8 +520,14 @@ class UiServer(Trigger, Startable):
         return {
             'message': 'Settings saved',
             'warning': self._generationalCapWarning(),
-            'reload_page': self.config.get(Setting.ENABLE_PROTON_UPLOAD) != old_proton_option
+            'reload_page': self._pageSettings() != old_page_settings
         }
+
+    def _pageSettings(self):
+        # The page only reads these when it loads (the colours are rendered
+        # into index.jinja2), so the web UI reloads itself when one changes.
+        return [self.config.get(setting) for setting in (
+            Setting.ENABLE_PROTON_UPLOAD, Setting.BACKGROUND_COLOR, Setting.ACCENT_COLOR)]
 
     def _generationalCapWarning(self):
         slots = self.config.generationalSlotCount()

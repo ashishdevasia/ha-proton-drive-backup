@@ -1,6 +1,7 @@
 """getNextPurges() must predict the backup the next sync actually deletes."""
 from datetime import datetime, timedelta
 
+import pytest
 import pytz
 
 from backup.config import Config, Setting
@@ -147,3 +148,16 @@ async def test_prediction_empty_model():
     })
     purges = model.getNextPurges()
     assert purges == {"HomeAssistant": None, "ProtonDrive": None}
+
+
+@pytest.mark.parametrize("days, kept", [(1, False), (999999, True), (1e19, True), (float("inf"), True)])
+async def test_delete_ignored_after_days_too_large_for_a_date(days, kept):
+    # "999999" typed to mean "never" is 999999 days, a cutoff further back than
+    # any date: it used to raise OverflowError and stop every sync.
+    model, time, source, dest = build({Setting.IGNORE_OTHER_BACKUPS: True,
+                                       Setting.DELETE_IGNORED_AFTER_DAYS: days})
+    other = source.insert("Made outside the add-on", time.now() - timedelta(days=5))
+    other.setIgnore(True)
+    await model.sync(time.now())
+    assert (other.slug() in source.current) == kept
+    assert any(not b.ignore() for b in source.current.values())  # the sync went on to make its backup

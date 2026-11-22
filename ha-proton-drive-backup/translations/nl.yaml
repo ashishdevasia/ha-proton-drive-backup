@@ -1,0 +1,161 @@
+# Namen en beschrijvingen voor het tabblad Configuratie van de add-on in Home
+# Assistant. Zie en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Aantal back-ups in Home Assistant
+    description: Zoveel van de nieuwste back-ups blijven op dit apparaat; de oudste wordt eerst verwijderd. Bij 0 wordt er nooit iets uit Home Assistant verwijderd (wil je geen lokale kopieën, zet dan ‘Na uploaden verwijderen uit Home Assistant’ aan).
+  max_backups_in_proton_drive:
+    name: Aantal back-ups in Proton Drive
+    description: Zoveel van de nieuwste back-ups blijven in Proton Drive; de oudste wordt eerst verwijderd. Bij 0 wordt er nooit iets uit Proton Drive verwijderd.
+  days_between_backups:
+    name: Dagen tussen back-ups
+    description: Hoe vaak er een nieuwe back-up wordt gemaakt, in dagen (decimalen toegestaan). Met een tijdstip ingesteld wordt het naar boven afgerond op hele dagen. 0 zet geplande back-ups uit.
+  ignore_other_backups:
+    name: Elders gemaakte back-ups negeren
+    description: Back-ups die deze add-on niet heeft gemaakt niet beheren of verwijderen.
+  ignore_upgrade_backups:
+    name: Update-back-ups negeren
+    description: De back-ups die Home Assistant automatisch bij updates maakt niet meetellen.
+  backup_storage:
+    name: Back-uplocatie
+    description: Naam van de Home Assistant-netwerkopslag waarin back-ups worden gemaakt, of local-disk. Leeg gebruikt de standaardlocatie van Home Assistant.
+  delete_after_upload:
+    name: Na uploaden verwijderen uit Home Assistant
+    description: Bewaar back-ups na het uploaden alleen in Proton Drive.
+  delete_before_new_backup:
+    name: Oude back-up verwijderen voordat er een nieuwe wordt gemaakt
+    description: 'Handig als er weinig schijfruimte is: de oudste back-up wordt eerst verwijderd.'
+  use_ssl:
+    name: SSL gebruiken
+    description: De extra webserver via HTTPS aanbieden, met ‘Certificaatbestand’ en ‘Sleutelbestand’.
+  certfile:
+    name: Certificaatbestand
+    description: 'Certificaat voor ‘SSL gebruiken’. Standaard: /ssl/fullchain.pem.'
+  keyfile:
+    name: Sleutelbestand
+    description: 'Privésleutel voor ‘SSL gebruiken’. Standaard: /ssl/privkey.pem.'
+  require_login:
+    name: Inloggen bij Home Assistant vereisen
+    description: Op de extra webserver om de gebruikersnaam en het wachtwoord van een Home Assistant-beheerder vragen. Laat dit aan zolang de extra server openstaat.
+  backup_name:
+    name: Naamsjabloon
+    description: Sjabloon voor back-upnamen, bijv. {type} Backup {year}-{month}-{day}. De instellingen van de web-UI tonen alle plaatshouders.
+  backup_time_of_day:
+    name: Tijdstip
+    description: Lokale tijd voor geplande back-ups, als HH:MM (24 uur). Leeg betekent elk moment.
+  warn_for_low_space:
+    name: Waarschuwen bij weinig ruimte
+    description: De vrije schijfruimte controleren voordat er een back-up wordt gemaakt, en met een waarschuwing stoppen als die laag is.
+  watch_backup_directory:
+    name: De back-upmap in de gaten houden
+    description: Nieuwe of verwijderde back-upbestanden meteen opmerken in plaats van bij de volgende synchronisatie.
+  generational_days:
+    name: Aantal dagelijkse back-ups
+    description: 'Generatieback-ups: hoeveel dagelijkse back-ups er worden bewaard. Zolang er een generatieoptie is ingesteld, telt 0 als 1, dus de nieuwste back-up blijft altijd.'
+  generational_weeks:
+    name: Aantal wekelijkse back-ups
+    description: 'Generatieback-ups: hoeveel wekelijkse back-ups er worden bewaard.'
+  generational_months:
+    name: Aantal maandelijkse back-ups
+    description: 'Generatieback-ups: hoeveel maandelijkse back-ups er worden bewaard.'
+  generational_years:
+    name: Aantal jaarlijkse back-ups
+    description: 'Generatieback-ups: hoeveel jaarlijkse back-ups er worden bewaard.'
+  generational_day_of_year:
+    name: Dag van de jaarlijkse back-up
+    description: Dag van het jaar (1–365) waarvan de back-up als jaarlijkse wordt bewaard.
+  generational_day_of_month:
+    name: Dag van de maandelijkse back-up
+    description: Dag van de maand (1–31) waarvan de back-up als maandelijkse wordt bewaard.
+  generational_day_of_week:
+    name: Dag van de wekelijkse back-up
+    description: Dag van de week waarvan de back-up als wekelijkse wordt bewaard.
+  generational_delete_early:
+    name: Extra back-ups vroeg verwijderen
+    description: Overbodige back-ups verwijderen voordat de limiet is bereikt.
+  notify_for_stale_backups:
+    name: Melden als back-ups verouderd zijn
+    description: Een blijvende melding sturen als er geen back-ups meer worden gemaakt, ook als ze pauzeren omdat de add-on is uitgelogd bij Proton.
+  enable_backup_stale_sensor:
+    name: Sensor voor verouderde back-ups
+    description: binary_sensor.backups_stale aanmaken, die aangaat als back-ups verouderd zijn.
+  enable_backup_state_sensor:
+    name: Sensor voor de back-upstatus
+    description: sensor.backup_state aanmaken, die de status van je back-ups meldt.
+  backup_password:
+    name: Back-upwachtwoord
+    description: 'Back-ups met dit wachtwoord versleutelen. Leeg betekent geen wachtwoord. Bewaar het goed: je hebt het nodig om te herstellen.'
+  exclude_folders:
+    name: Mappen uitsluiten
+    description: Mappen, gescheiden door komma's, die niet in back-ups komen, bijv. share,media. Hiermee worden back-ups gedeeltelijk.
+  exclude_addons:
+    name: Add-ons uitsluiten
+    description: Add-on-slugs, gescheiden door komma's, die niet in back-ups komen, bijv. core_mariadb. Hiermee worden back-ups gedeeltelijk.
+  exclude_ha_database:
+    name: De Home Assistant-database uitsluiten
+    description: home-assistant_v2.db buiten back-ups laten om ze kleiner te maken.
+  stop_addons:
+    name: Add-ons stoppen tijdens de back-up
+    description: Add-on-slugs, gescheiden door komma's, die voor een back-up worden gestopt en daarna weer gestart (handig voor databases).
+  expose_extra_server:
+    name: Extra webserver openstellen
+    description: De web-UI ook op een eigen poort aanbieden, buiten Home Assistant-ingress. Zet daarbij ‘Inloggen bij Home Assistant vereisen’ aan.
+  confirm_multiple_deletes:
+    name: Vragen voor het verwijderen van meerdere back-ups
+    description: Pauzeren en in de web-UI om bevestiging vragen voordat er meer dan één oude back-up tegelijk wordt verwijderd.
+  enable_proton_upload:
+    name: Back-ups uploaden naar Proton Drive
+    description: Als dit uit staat, beheert de add-on alleen back-ups in Home Assistant.
+  proton_folder_name:
+    name: Proton Drive-map
+    description: Map onder de hoofdmap van Proton Drive waar back-ups worden opgeslagen. Gebruik / voor submappen, bijv. backups/ha. Gebruik hiervoor een eigen map.
+  proton_cli_path:
+    name: Pad naar de proton-drive-CLI
+    description: Pad naar de meegeleverde Proton Drive-CLI.
+  proton_data_path:
+    name: Proton-gegevenspad
+    description: Waar de CLI zijn sessie, sleutelbos en tijdelijke overdrachtsbestanden bewaart.
+  proton_drive_timeout_seconds:
+    name: CLI-time-out
+    description: Seconden om te wachten op lijst- en metadatabewerkingen.
+  proton_transfer_timeout_seconds:
+    name: Time-out voor overdracht
+    description: Seconden om te wachten op één upload of download.
+  permanently_delete:
+    name: Verwijderde back-ups definitief verwijderen
+    description: Verwijderde back-ups ook uit de prullenbak van Proton Drive halen, zodat ze niet meer meetellen voor je opslagruimte. Zet dit uit om ze in de prullenbak herstelbaar te houden.
+  delete_ignored_after_days:
+    name: Genegeerde back-ups verwijderen na
+    description: Aantal dagen waarna genegeerde back-ups automatisch worden verwijderd. 0 bewaart ze altijd.
+  call_backup_snapshot:
+    name: Back-ups ‘snapshots’ noemen
+    description: De oudere term ‘snapshot’ gebruiken in meldingen en sensoren.
+  background_color:
+    name: Achtergrondkleur
+    description: 'Achtergrondkleur van de web-UI, als #RRGGBB. Leeg gebruikt de standaard.'
+  accent_color:
+    name: Accentkleur
+    description: 'Accentkleur van de web-UI, als #RRGGBB. Leeg gebruikt de standaard.'
+  max_sync_interval_seconds:
+    name: Max. synchronisatie-interval
+    description: Hoe lang de add-on maximaal wacht tussen synchronisaties, in seconden (minimaal 300).
+  default_sync_interval_variation:
+    name: Variatie in het synchronisatie-interval
+    description: Willekeurige spreiding van de periodieke synchronisatie, als fractie (0–1) van het maximale interval. Met 0.5 en 3 uur zitten synchronisaties 1,5 tot 3 uur uit elkaar.
+  port:
+    name: Poort van de extra webserver
+    description: 'Poort waarop de extra webserver binnen de add-on luistert. Standaard: 8471.'
+  log_level:
+    name: Logniveau (web-UI)
+    description: Hoe uitgebreid het tabblad Logboek van de web-UI en bugrapporten zijn.
+  console_log_level:
+    name: Logniveau (console)
+    description: Hoe uitgebreid het tabblad Logboek van de add-on in Home Assistant is.
+  max_backoff_seconds:
+    name: Max. wachttijd tussen pogingen
+    description: Langste wachttijd tussen pogingen na een mislukte synchronisatie, in seconden (minimaal 3600).
+  ha_reporting_interval_seconds:
+    name: Updatefrequentie van de sensoren
+    description: Hoe vaak de add-on zijn sensoren in Home Assistant bijwerkt, in seconden.
+network:
+  8471/tcp: Extra webserver, buiten ingress (alleen met ‘Extra webserver openstellen’ aan).

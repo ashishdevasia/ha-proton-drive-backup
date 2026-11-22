@@ -1,0 +1,161 @@
+# Nombres y descripciones para la pestaña Configuración del complemento en
+# Home Assistant. Ver en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Copias que conservar en Home Assistant
+    description: Cuántas copias recientes se conservan en este equipo; la más antigua se elimina primero. Con 0 no se elimina nunca de Home Assistant (para no dejar copias locales, activa «Eliminar de Home Assistant tras subir»).
+  max_backups_in_proton_drive:
+    name: Copias que conservar en Proton Drive
+    description: Cuántas copias recientes se conservan en Proton Drive; la más antigua se elimina primero. Con 0 no se elimina nunca de Proton Drive.
+  days_between_backups:
+    name: Días entre copias
+    description: Cada cuánto se crea una copia nueva, en días (se admiten decimales). Si hay una hora del día fijada, se redondea hacia arriba a días enteros. 0 desactiva las copias programadas.
+  ignore_other_backups:
+    name: Ignorar las copias hechas en otro sitio
+    description: No gestionar ni eliminar las copias que no creó este complemento.
+  ignore_upgrade_backups:
+    name: Ignorar las copias de actualización
+    description: No contar las copias que Home Assistant hace automáticamente al actualizar.
+  backup_storage:
+    name: Ubicación de las copias
+    description: Nombre del almacenamiento de red de Home Assistant donde crear las copias, o local-disk. Vacío usa la ubicación por defecto de Home Assistant.
+  delete_after_upload:
+    name: Eliminar de Home Assistant tras subir
+    description: Conservar las copias solo en Proton Drive una vez subidas.
+  delete_before_new_backup:
+    name: Eliminar la copia antigua antes de hacer una nueva
+    description: 'Útil cuando queda poco espacio: primero se elimina la copia más antigua.'
+  use_ssl:
+    name: Usar SSL
+    description: Usar HTTPS en el servidor web adicional, con «Archivo de certificado» y «Archivo de clave».
+  certfile:
+    name: Archivo de certificado
+    description: 'Certificado para «Usar SSL». Por defecto: /ssl/fullchain.pem.'
+  keyfile:
+    name: Archivo de clave
+    description: 'Clave privada para «Usar SSL». Por defecto: /ssl/privkey.pem.'
+  require_login:
+    name: Exigir inicio de sesión de Home Assistant
+    description: Pedir el usuario y la contraseña de un administrador de Home Assistant en el servidor web adicional. Déjalo activado siempre que el servidor adicional esté expuesto.
+  backup_name:
+    name: Plantilla de nombres
+    description: Plantilla para los nombres de las copias, p. ej. {type} Backup {year}-{month}-{day}. Los ajustes de la interfaz web muestran todos los marcadores.
+  backup_time_of_day:
+    name: Hora del día
+    description: Hora local a la que crear las copias programadas, como HH:MM (24 horas). Vacío significa cualquier hora.
+  warn_for_low_space:
+    name: Avisar cuando quede poco espacio
+    description: Comprobar el espacio libre antes de crear una copia y detenerse con un aviso si queda poco.
+  watch_backup_directory:
+    name: Vigilar el directorio de copias
+    description: Detectar al momento las copias nuevas o eliminadas, en vez de en la siguiente sincronización.
+  generational_days:
+    name: Copias diarias que conservar
+    description: 'Copias generacionales: cuántas copias diarias conservar. Mientras haya alguna opción generacional activa, 0 cuenta como 1, así que la copia más reciente siempre se conserva.'
+  generational_weeks:
+    name: Copias semanales que conservar
+    description: 'Copias generacionales: cuántas copias semanales conservar.'
+  generational_months:
+    name: Copias mensuales que conservar
+    description: 'Copias generacionales: cuántas copias mensuales conservar.'
+  generational_years:
+    name: Copias anuales que conservar
+    description: 'Copias generacionales: cuántas copias anuales conservar.'
+  generational_day_of_year:
+    name: Día de la copia anual
+    description: Día del año (1–365) cuya copia se conserva como la anual.
+  generational_day_of_month:
+    name: Día de la copia mensual
+    description: Día del mes (1–31) cuya copia se conserva como la mensual.
+  generational_day_of_week:
+    name: Día de la copia semanal
+    description: Día de la semana cuya copia se conserva como la semanal.
+  generational_delete_early:
+    name: Eliminar pronto las copias sobrantes
+    description: Eliminar las copias redundantes antes de llegar al límite.
+  notify_for_stale_backups:
+    name: Avisar cuando las copias estén atrasadas
+    description: Enviar una notificación persistente si dejan de hacerse copias, también cuando se pausan porque el complemento no tiene sesión en Proton.
+  enable_backup_stale_sensor:
+    name: Sensor de copias atrasadas
+    description: Crear binary_sensor.backups_stale, que se activa cuando las copias están atrasadas.
+  enable_backup_state_sensor:
+    name: Sensor del estado de las copias
+    description: Crear sensor.backup_state, que informa del estado de tus copias.
+  backup_password:
+    name: Contraseña de las copias
+    description: 'Cifrar las copias con esta contraseña. Vacío significa sin contraseña. Guárdala en un lugar seguro: hace falta para restaurar.'
+  exclude_folders:
+    name: Excluir carpetas
+    description: Carpetas, separadas por comas, que se dejan fuera de las copias, p. ej. share,media. Con esto las copias pasan a ser parciales.
+  exclude_addons:
+    name: Excluir complementos
+    description: Slugs de complementos, separados por comas, que se dejan fuera de las copias, p. ej. core_mariadb. Con esto las copias pasan a ser parciales.
+  exclude_ha_database:
+    name: Excluir la base de datos de Home Assistant
+    description: Dejar home-assistant_v2.db fuera de las copias para que ocupen menos.
+  stop_addons:
+    name: Detener complementos durante la copia
+    description: Slugs de complementos, separados por comas, que se detienen antes de una copia y se inician de nuevo después (útil para bases de datos).
+  expose_extra_server:
+    name: Exponer un servidor web adicional
+    description: Servir también la interfaz web en su propio puerto, fuera del ingress de Home Assistant. Activa con ello «Exigir inicio de sesión de Home Assistant».
+  confirm_multiple_deletes:
+    name: Preguntar antes de eliminar varias copias
+    description: Detenerse y preguntar en la interfaz web antes de eliminar más de una copia antigua a la vez.
+  enable_proton_upload:
+    name: Subir las copias a Proton Drive
+    description: Si está desactivado, el complemento solo gestiona las copias dentro de Home Assistant.
+  proton_folder_name:
+    name: Carpeta de Proton Drive
+    description: Carpeta, bajo la raíz de Proton Drive, donde se guardan las copias. Usa / para anidar carpetas, p. ej. backups/ha. Usa una carpeta solo para esto.
+  proton_cli_path:
+    name: Ruta de la CLI proton-drive
+    description: Ruta de la CLI de Proton Drive incluida.
+  proton_data_path:
+    name: Ruta de datos de Proton
+    description: Dónde guarda la CLI su sesión, su llavero y los archivos temporales de transferencia.
+  proton_drive_timeout_seconds:
+    name: Tiempo de espera de la CLI
+    description: Segundos que esperar a las operaciones de listado y metadatos.
+  proton_transfer_timeout_seconds:
+    name: Tiempo de espera de transferencia
+    description: Segundos que esperar a una sola subida o descarga.
+  permanently_delete:
+    name: Eliminar definitivamente las copias quitadas
+    description: Quitar también las copias eliminadas de la papelera de Proton Drive, para que dejen de contar en tu cuota de almacenamiento. Desactívalo para poder recuperarlas de la papelera.
+  delete_ignored_after_days:
+    name: Eliminar las copias ignoradas tras
+    description: Días tras los que las copias ignoradas se eliminan automáticamente. 0 las conserva siempre.
+  call_backup_snapshot:
+    name: Llamar «snapshots» a las copias
+    description: Usar el término antiguo «snapshot» en notificaciones y sensores.
+  background_color:
+    name: Color de fondo
+    description: 'Color de fondo de la interfaz web, como #RRGGBB. Vacío usa el color por defecto.'
+  accent_color:
+    name: Color de acento
+    description: 'Color de acento de la interfaz web, como #RRGGBB. Vacío usa el color por defecto.'
+  max_sync_interval_seconds:
+    name: Intervalo máximo de sincronización
+    description: Lo máximo que el complemento espera entre sincronizaciones, en segundos (al menos 300).
+  default_sync_interval_variation:
+    name: Variación del intervalo de sincronización
+    description: Dispersión aleatoria de la sincronización periódica, como fracción (0–1) del intervalo máximo. Con 0.5 y 3 horas, las sincronizaciones se separan entre 1,5 y 3 horas.
+  port:
+    name: Puerto del servidor web adicional
+    description: 'Puerto en el que escucha el servidor web adicional dentro del complemento. Por defecto: 8471.'
+  log_level:
+    name: Nivel de registro (interfaz web)
+    description: Nivel de detalle que se guarda para la pestaña Registros de la interfaz web y los informes de error.
+  console_log_level:
+    name: Nivel de registro (consola)
+    description: Nivel de detalle de la pestaña Registro del complemento en Home Assistant.
+  max_backoff_seconds:
+    name: Espera máxima entre reintentos
+    description: Lo máximo que se espera entre reintentos tras una sincronización fallida, en segundos (al menos 3600).
+  ha_reporting_interval_seconds:
+    name: Intervalo de actualización de los sensores
+    description: Cada cuánto actualiza el complemento sus sensores en Home Assistant, en segundos.
+network:
+  8471/tcp: Servidor web adicional, fuera del ingress (solo con «Exponer un servidor web adicional» activado).

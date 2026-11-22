@@ -4,7 +4,7 @@ import os.path
 import uuid
 from typing import Any, Dict, List, Optional
 
-from .settings import _LOOKUP, Setting, _VALIDATORS
+from .settings import _LOOKUP, Setting, _VALIDATORS, ADDON_OPTION_KEYS, NEW_INPUT_LIMITS
 from ..logger import getLogger
 from backup.file import JsonFileSaver
 
@@ -13,11 +13,9 @@ logger = getLogger(__name__)
 ALWAYS_KEEP = {
     Setting.DAYS_BETWEEN_BACKUPS,
     Setting.MAX_BACKUPS_IN_HA,
-    Setting.MAX_BACKUPS_IN_GOOGLE_DRIVE,
 }
 
 KEEP_DEFAULT = {
-    Setting.SEND_ERROR_REPORTS,
     Setting.IGNORE_UPGRADE_BACKUPS
 }
 
@@ -32,10 +30,6 @@ SERVER_OPTIONS = {
 
 NON_UI_SETTING = {
     Setting.SUPERVISOR_URL,
-    Setting.TOKEN_SERVER_HOSTS,
-    Setting.DRIVE_AUTHORIZE_URL,
-    Setting.DRIVE_DEVICE_CODE_URL,
-    Setting.DEFAULT_DRIVE_CLIENT_ID,
     Setting.NEW_BACKUP_TIMEOUT_SECONDS,
     Setting.LOG_LEVEL,
     Setting.CONSOLE_LOG_LEVEL,
@@ -49,14 +43,12 @@ NON_UI_SETTING = {
 
 UPGRADE_OPTIONS = {
     Setting.DEPRECTAED_MAX_BACKUPS_IN_HA: Setting.MAX_BACKUPS_IN_HA,
-    Setting.DEPRECTAED_MAX_BACKUPS_IN_GOOGLE_DRIVE: Setting.MAX_BACKUPS_IN_GOOGLE_DRIVE,
     Setting.DEPRECATED_DAYS_BETWEEN_BACKUPS: Setting.DAYS_BETWEEN_BACKUPS,
     Setting.DEPRECTAED_IGNORE_OTHER_BACKUPS: Setting.IGNORE_OTHER_BACKUPS,
     Setting.DEPRECTAED_IGNORE_UPGRADE_BACKUPS: Setting.IGNORE_UPGRADE_BACKUPS,
     Setting.DEPRECTAED_DELETE_BEFORE_NEW_BACKUP: Setting.DELETE_BEFORE_NEW_BACKUP,
     Setting.DEPRECTAED_BACKUP_NAME: Setting.BACKUP_NAME,
     Setting.DEPRECTAED_BACKUP_TIME_OF_DAY: Setting.BACKUP_TIME_OF_DAY,
-    Setting.DEPRECTAED_SPECIFY_BACKUP_FOLDER: Setting.SPECIFY_BACKUP_FOLDER,
     Setting.DEPRECTAED_NOTIFY_FOR_STALE_BACKUPS: Setting.NOTIFY_FOR_STALE_BACKUPS,
     Setting.DEPRECTAED_ENABLE_BACKUP_STALE_SENSOR: Setting.ENABLE_BACKUP_STALE_SENSOR,
     Setting.DEPRECTAED_ENABLE_BACKUP_STATE_SENSOR: Setting.ENABLE_BACKUP_STATE_SENSOR,
@@ -149,7 +141,11 @@ class Config():
         validated, upgraded = self.validate(new_config)
         return validated
 
-    def validate(self, new_config) -> Dict[str, Any]:
+    def validate(self, new_config, strict=False) -> Dict[str, Any]:
+        """
+        strict: new_config is new input (the web UI's save, /saveconfig), so
+        values it changes must also be within NEW_INPUT_LIMITS.
+        """
         final_config = {}
 
         upgraded = False
@@ -164,6 +160,8 @@ class Config():
                 setting = key
 
             value = setting.validator().validate(new_config[key])
+            if strict:
+                self._checkNewInput(setting, new_config[key], value)
             if setting in UPGRADE_OPTIONS:
                 upgraded = True
             if isinstance(value, str) and len(value) == 0 and setting in EMPTY_IS_DEFAULT:
@@ -178,9 +176,14 @@ class Config():
         if upgraded:
             final_config[Setting.CALL_BACKUP_SNAPSHOT] = True
 
-        # add in non-ui settings
+        # Carry internal settings forward: no caller passes them.  Options are
+        # left alone, since every caller passes all of them (the web UI's save,
+        # Supervisor's stored options, validateUpdate's copy), so a missing one
+        # means its default; carrying it forward undid a reset to the default.
         for setting in NON_UI_SETTING:
-            if self.get(setting) != setting.default() and not (setting in new_config or setting.key in new_config) and setting not in self.overrides:
+            if setting.key() in ADDON_OPTION_KEYS:
+                continue
+            if self.get(setting) != setting.default() and not (setting in new_config or setting.key() in new_config) and setting not in self.overrides:
                 final_config[setting] = self.get(setting)
 
         # add defaults
@@ -194,6 +197,16 @@ class Config():
                     del final_config[key]
 
         return final_config, upgraded
+
+    def _checkNewInput(self, setting: Setting, given, value):
+        limit = NEW_INPUT_LIMITS.get(setting)
+        # The settings form sends every option back, so an unchanged value is
+        # only being kept: it may be one set in the Configuration tab, outside
+        # these limits but within config.json's.
+        if limit is None or value is None or value == self.get(setting):
+            return
+        if not limit.allows(value):
+            setting.validator().raiseForValue(given)
 
     def update(self, new_config):
         validated, upgraded = self.validate(new_config)

@@ -1,9 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+{#
+  lightTheme / darkOnAccent come from backup/theme.py: a light background
+  colour switches app.css to its light palette, and a light accent colour gets
+  dark text on buttons instead of white.
+#}
+<html lang="en"{% if lightTheme %} data-theme="light"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="dark">
+  <meta name="color-scheme" content="{{ 'light' if lightTheme else 'dark' }}">
   <title>Proton Drive Backup</title>
   <link rel="icon" href="favicon.ico">
   {#
@@ -15,6 +20,7 @@
     :root {
       --user-bg: {{ backgroundColor or '#0b1020' }};
       --user-accent: {{ accentColor or '#1a5fb4' }};
+      --user-on-accent: {{ '#141826' if darkOnAccent else '#fff' }};
     }
   </style>
   <link rel="stylesheet" href="static/{{ version }}/app/app.css">
@@ -37,6 +43,9 @@
   {# mock.js is a dev-only API stub (activated with ?mock=1). It is NOT served
      in production — only the standalone devserver.py sets devMock. #}
   {% if devMock %}<script src="static/{{ version }}/app/mock.js"></script>{% endif %}
+  {# i18n.js picks the language and loads app/locales/<lang>.json; it sets
+     <html lang> before the app renders. #}
+  <script src="static/{{ version }}/app/i18n.js"></script>
   <script src="static/{{ version }}/app/app.js"></script>
 </body>
 </html>

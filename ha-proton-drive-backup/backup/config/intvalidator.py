@@ -13,13 +13,18 @@ class IntValidator(Validator):
     def validate(self, value):
         if value is None or (type(value) == str and len(value) == 0):
             return None
+        given = value
+        # True would be read as 1, and a list or dict raised a TypeError that
+        # became an unexpected error without the setting's name.
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            self.raiseForValue(given)
         try:
             value = int(value)
-        except ValueError:
-            self.raiseForValue(value)
+        except (ValueError, OverflowError):  # int(float("nan")) and int(float("inf"))
+            self.raiseForValue(given)
 
         if self.max is not None and value > self.max:
-            self.raiseForValue(value)
+            self.raiseForValue(given)
         if self.min is not None and value < self.min:
-            self.raiseForValue(value)
+            self.raiseForValue(given)
         return value

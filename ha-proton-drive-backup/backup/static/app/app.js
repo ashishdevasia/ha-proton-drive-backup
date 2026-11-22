@@ -11,6 +11,10 @@
   try { BOOT = JSON.parse(document.getElementById("bootstrap").textContent); } catch (e) {}
   var VERSION = BOOT.version || "";
 
+  // Translations (i18n.js): t(key, params) for every user-visible string.
+  var I18n = window.I18n;  // missing if i18n.js didn't load; see the end of this file
+  var t = I18n ? I18n.t : null;
+
   // Ingress serves us under an opaque path prefix; build everything relative
   // to the current directory so nothing is hard-coded to "/".
   var BASE = location.pathname.replace(/\/(index(\.html)?)?$/, "").replace(/\/$/, "");
@@ -98,12 +102,31 @@
     opts = opts || {};
     return fetch(u(path), opts).then(function (r) {
       return r.text().then(function (txt) {
-        var data = {};
-        try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { message: txt }; }
-        if (!r.ok) { data.http_status = data.http_status || r.status; return Promise.reject(data); }
+        var data = {}, json = true;
+        try { data = txt ? JSON.parse(txt) : {}; } catch (e) { data = { message: txt }; json = false; }
+        if (!r.ok) {
+          if (!json || !txt) data = plainError(r.status, txt);
+          data.http_status = data.http_status || r.status;
+          return Promise.reject(data);
+        }
         return data;
       });
     });
+  }
+  // A failed request whose body isn't the add-on's JSON. The add-on's own
+  // plain-text errors ("400: the request body isn't JSON", the extra server's
+  // 403 about require_login) are shown as they are. Home Assistant's and
+  // proxies' error pages aren't, so errText gives translated text instead:
+  // a 401 comes from ingress when its session has expired, or from the extra
+  // server's sign-in (require_login); ingress sends a bare 403 when it refuses
+  // access; 5xx and HTML pages come from a proxy while the add-on is down (the
+  // add-on never sends plain-text 5xx).
+  function plainError(status, txt) {
+    var body = (txt || "").trim();
+    if (status === 401) return { message_key: "error.session_expired" };
+    if (body === "403: Forbidden") return { message_key: "error.forbidden" };
+    if (!body || status >= 500 || body.charAt(0) === "<") return {};
+    return { message: body };
   }
   function apiJson(path, body) {
     return api(path, {
@@ -145,15 +168,15 @@
     setBusy(true);
     return promise.then(function (d) {
       setBusy(false);
-      if (okMsg !== false) toast(okMsg || (d && d.message) || "Done", "ok");
+      if (okMsg !== false) toast(okMsg || (d && d.message) || t("common.done"), "ok");
       scheduleRefresh(400);
       return d;
     }, function (e) {
       setBusy(false);
       if (e && e.error_type === "please_wait") {
-        toast("A sync is in progress — try again in a moment.", "info");
+        toast(t("toast.sync_busy_retry"), "info");
       } else {
-        toast((e && e.message) || "Something went wrong", "bad");
+        toast(errText(e, "toast.something_went_wrong"), "bad");
       }
       throw e;
     });
@@ -187,7 +210,7 @@
       }
       offlineBar.innerHTML = "";
       offlineBar.appendChild(iconNode("alert"));
-      offlineBar.appendChild(ce("span", { text: msg || "Can't reach the add-on — reconnecting…" }));
+      offlineBar.appendChild(ce("span", { text: msg || t("offline.reconnecting") }));
     } else if (offlineBar) {
       offlineBar.remove(); offlineBar = null;
     }
@@ -218,8 +241,20 @@
     var parts = [];
     var sp = fmtSpeed(up.speed);
     if (sp) parts.push(sp);
-    if (up.started) parts.push("started " + up.started);
+    var when = I18n.relTime(up.started_timestamp) || up.started;
+    if (when) parts.push(t("upload.started", { when: when }));
     return parts.join(" · ");
+  }
+
+  // Dates: the backend sends epoch seconds (null = no date), rendered here in
+  // the viewer's language, next to English text kept for older payloads.
+  function whenText(ts, text, noneKey) {
+    if (ts === null) return t(noneKey);
+    return I18n.relTime(ts) || text;
+  }
+  function whenDetail(ts, text) {
+    if (ts === null) return null;
+    return I18n.dateTime(ts) || text;
   }
 
   // ------------------------------------------------------------------------
@@ -230,6 +265,8 @@
     config: null,        // { config, defaults, addons, folders }
     configDraft: {},     // unsaved settings edits, keyed by setting; survives
                          //   tab switches / advanced toggle until save or reset
+    badNumbers: {},      // setting -> true: its number field holds text the
+                         //   browser can't read as a number (see renderField)
     tab: "dashboard",
     pendingLogin: false,
     lastUploads: {},     // slug -> destination title (to detect transfer completion)
@@ -263,10 +300,12 @@
     api("/getstatus").then(function (s) {
       var prev = state.status;
       state.status = s;
+      I18n.setTimeZone(s.time_zone);
+      I18n.setServerTime(s.now_timestamp);
       // Detect login completion.
       if (state.pendingLogin && s.proton_authenticated) {
         state.pendingLogin = false;
-        toast("Signed in to Proton Drive", "ok");
+        toast(t("toast.signed_in"), "ok");
         closeModal();
         api("/protonauth", { method: "POST" }).catch(function () {});
       }
@@ -284,7 +323,7 @@
       scheduleRefresh(pollInterval(s));
     }).catch(function (e) {
       if (!state.booted) { renderFatal(e); }
-      else { setOffline(true, (e && e.message) || "Can't reach the add-on — reconnecting…"); }
+      else { setOffline(true, errText(e, "offline.reconnecting")); }
       scheduleRefresh(8000);
     });
   }
@@ -300,13 +339,15 @@
       if (!b) return "gone";
       return (b.sources || []).some(function (x) { return x.key === key; }) ? "ok" : "missing";
     }
-    function label(dest) { return dest === "Home Assistant" ? "Download to Home Assistant" : "Upload to " + dest; }
+    // dest is the backend's destination title ("Home Assistant" / "Proton Drive").
+    function done(dest) { return dest === "Home Assistant" ? t("toast.download_to_ha_done") : t("toast.upload_done", { dest: dest }); }
+    function failed(dest) { return dest === "Home Assistant" ? t("toast.download_to_ha_failed") : t("toast.upload_failed", { dest: dest }); }
     var nextPending = {};
     Object.keys(state.lastUploads).forEach(function (slug) {
       if (nowUploading[slug]) return;
       var dest = state.lastUploads[slug];
       var out = outcome(slug, dest);
-      if (out === "ok") toast(label(dest) + " complete", "ok");
+      if (out === "ok") toast(done(dest), "ok");
       // The HA direction clears its transfer indicators one supervisor call
       // before the copy is attached, so "missing" right after the transfer
       // can still be a success — give it one more poll before judging.
@@ -316,8 +357,8 @@
       if (nowUploading[slug] || nextPending[slug]) return; // transfer restarted
       var dest = state.pendingOutcome[slug];
       var out = outcome(slug, dest);
-      if (out === "ok") toast(label(dest) + " complete", "ok");
-      else if (out === "missing") toast(label(dest) + " didn't finish — check the add-on log", "bad");
+      if (out === "ok") toast(done(dest), "ok");
+      else if (out === "missing") toast(failed(dest), "bad");
     });
     state.pendingOutcome = nextPending;
     state.lastUploads = nowUploading;
@@ -326,12 +367,13 @@
   // ------------------------------------------------------------------------
   // Render — shell
   // ------------------------------------------------------------------------
+  // Labels: t("tab.<id>").
   var TABS = [
-    { id: "dashboard", label: "Dashboard", icon: "shield" },
-    { id: "backups", label: "Backups", icon: "archive" },
-    { id: "settings", label: "Settings", icon: "settings" },
-    { id: "logs", label: "Logs", icon: "doc" },
-    { id: "about", label: "About", icon: "info" }
+    { id: "dashboard", icon: "shield" },
+    { id: "backups", icon: "archive" },
+    { id: "settings", icon: "settings" },
+    { id: "logs", icon: "doc" },
+    { id: "about", icon: "info" }
   ];
 
   // Tracks what is currently rendered so polling doesn't needlessly rebuild the
@@ -343,7 +385,8 @@
     var app = el("#app");
     app.removeAttribute("aria-busy");
 
-    if (!el(".shell")) {
+    // #view exists only in the real layout; the error screens also use .shell.
+    if (!el("#view")) {
       app.innerHTML = "";
       app.appendChild(renderTopbar());
       var shell = ce("div", { class: "shell" });
@@ -384,7 +427,10 @@
       state.tab, s.syncing ? 1 : 0, s.proton_authenticated ? 1 : 0, s.enable_proton_upload ? 1 : 0,
       s.backup_cooldown_active ? 1 : 0, s.proton_login_in_progress ? 1 : 0, s.proton_auth_warning || "",
       s.last_error ? s.last_error.error_type : "", s.last_error_count || 0,
-      s.next_backup_text || "", s.last_backup_text || "", s.proton_folder || ""
+      // The text shown, not the server's English, which changes on its own
+      // schedule: "in 2 minutes" must be redrawn when it becomes "in 1 minute".
+      whenText(s.next_backup_timestamp, s.next_backup_text, "dashboard.disabled"),
+      whenText(s.last_backup_timestamp, s.last_backup_text, "dashboard.never"), s.proton_folder || ""
     ];
     ["HomeAssistant", "ProtonDrive"].forEach(function (k) {
       var src = (s.sources || {})[k] || {};
@@ -417,8 +463,8 @@
       // Only the determinate (staging) bar has a width / % / live speed to push;
       // the indeterminate CLI-phase bar animates on its own.
       var i = box.querySelector(".bar:not(.indeterminate) > i"); if (i) i.style.width = pct + "%";
-      var p = box.querySelector(".u-pct"); if (p) p.textContent = pct + "%";
-      var t = box.querySelector(".u-total"); if (t) t.textContent = fmtBytes(up.total);
+      var p = box.querySelector(".u-pct"); if (p) p.textContent = I18n.percent(pct);
+      var tot = box.querySelector(".u-total"); if (tot) tot.textContent = fmtBytes(up.total);
       var sp = box.querySelector(".u-speed"); if (sp) sp.textContent = uploadFoot(up);
     });
     var am = el("#activity-msg"); if (am) am.textContent = activityMessage(s);
@@ -442,9 +488,9 @@
     var host = el("#tb-sync"); if (!host) return;
     var label, live = false, idle = false;
     var uploading = (s.backups || []).filter(isActive);
-    if (s.syncing) { label = "Syncing…"; live = true; }
-    else if (uploading.length) { label = "Working…"; live = true; }
-    else { label = "Idle"; idle = true; }
+    if (s.syncing) { label = t("topbar.syncing"); live = true; }
+    else if (uploading.length) { label = t("topbar.working"); live = true; }
+    else { label = t("topbar.idle"); idle = true; }
     // Only rewrite when the chip actually changes, so its blink animation
     // doesn't restart on every poll.
     var key = label + "|" + live + "|" + idle;
@@ -462,16 +508,16 @@
     if (focus) { var btn = el("#tab-" + id); if (btn) try { btn.focus(); } catch (e) {} }
   }
   function renderTabs() {
-    var nav = ce("nav", { class: "tabs", role: "tablist", "aria-label": "Sections" });
-    TABS.forEach(function (t, idx) {
-      var selected = state.tab === t.id;
+    var nav = ce("nav", { class: "tabs", role: "tablist", "aria-label": t("tab.aria_label") });
+    TABS.forEach(function (tab, idx) {
+      var selected = state.tab === tab.id;
       var btn = ce("button", {
         // Roving tabindex: only the selected tab is in the tab order; arrow keys
         // move between the rest (ARIA tablist pattern).
-        class: "tab", role: "tab", id: "tab-" + t.id, "data-tab": t.id,
+        class: "tab", role: "tab", id: "tab-" + tab.id, "data-tab": tab.id,
         "aria-controls": "view", tabindex: selected ? "0" : "-1",
         "aria-selected": selected ? "true" : "false",
-        onclick: function () { selectTab(t.id); },
+        onclick: function () { selectTab(tab.id); },
         onkeydown: function (e) {
           var next = null;
           if (e.key === "ArrowRight" || e.key === "ArrowDown") next = (idx + 1) % TABS.length;
@@ -480,15 +526,15 @@
           else if (e.key === "End") next = TABS.length - 1;
           if (next != null) { e.preventDefault(); selectTab(TABS[next].id, true); }
         }
-      }, [iconNode(t.icon), ce("span", { text: t.label }), ce("span", { class: "badge hidden", id: "tabbadge-" + t.id })]);
+      }, [iconNode(tab.icon), ce("span", { text: t("tab." + tab.id) }), ce("span", { class: "badge hidden", id: "tabbadge-" + tab.id })]);
       nav.appendChild(btn);
     });
     return nav;
   }
   function updateTabs() {
-    TABS.forEach(function (t) {
-      var btn = el("#tab-" + t.id); if (!btn) return;
-      var selected = state.tab === t.id;
+    TABS.forEach(function (tab) {
+      var btn = el("#tab-" + tab.id); if (!btn) return;
+      var selected = state.tab === tab.id;
       btn.setAttribute("aria-selected", selected ? "true" : "false");
       btn.setAttribute("tabindex", selected ? "0" : "-1");
     });
@@ -516,9 +562,9 @@
       ce("div", { class: "banner bad", style: "margin-top:40px" }, [
         iconNode("alert", "b-ico"),
         ce("div", { class: "b-body" }, [
-          ce("div", { class: "b-title", text: "Couldn't reach the add-on" }),
-          ce("div", { class: "b-msg", text: (e && e.message) || "The backend isn't responding. It may still be starting up." }),
-          ce("div", { class: "b-actions" }, [ce("button", { class: "btn", text: "Retry", onclick: refresh })])
+          ce("div", { class: "b-title", text: t("fatal.title") }),
+          ce("div", { class: "b-msg", text: errText(e, "fatal.message") }),
+          ce("div", { class: "b-actions" }, [ce("button", { class: "btn", text: t("common.retry"), onclick: refresh })])
         ])
       ])
     ]));
@@ -540,27 +586,29 @@
     var canBackup = s.proton_authenticated || !s.enable_proton_upload;
     var actions = ce("div", { class: "card" }, [
       ce("div", { class: "card-head" }, [
-        ce("h2", { text: "Overview" }), ce("div", { class: "spacer" }),
-        ce("button", { class: "btn", onclick: openCreateBackup }, [iconNode("plus"), ce("span", { text: "Back up now" })]),
-        ce("button", { class: "btn ghost", onclick: doSync }, [iconNode("sync"), ce("span", { text: s.syncing ? "Syncing…" : "Sync now" })])
+        ce("h2", { text: t("dashboard.overview") }), ce("div", { class: "spacer" }),
+        ce("button", { class: "btn", onclick: openCreateBackup }, [iconNode("plus"), ce("span", { text: t("common.back_up_now") })]),
+        ce("button", { class: "btn ghost", onclick: doSync }, [iconNode("sync"), ce("span", { text: s.syncing ? t("topbar.syncing") : t("dashboard.sync_now") })])
       ]),
       ce("div", { class: "grid cols-3" }, [
-        statTile("Next backup", s.next_backup_text, s.next_backup_detail, "clock"),
-        statTile("Last backup", s.last_backup_text, s.last_backup_detail, "check"),
+        statTile(t("dashboard.next_backup"), whenText(s.next_backup_timestamp, s.next_backup_text, "dashboard.disabled"),
+          whenDetail(s.next_backup_timestamp, s.next_backup_detail), "clock"),
+        statTile(t("dashboard.last_backup"), whenText(s.last_backup_timestamp, s.last_backup_text, "dashboard.never"),
+          whenDetail(s.last_backup_timestamp, s.last_backup_detail), "check"),
         statTile("Proton Drive",
-          !s.proton_authenticated ? (s.proton_auth_warning ? "Unavailable" : "Signed out") : s.proton_auth_warning ? "Connected (unverified)" : "Connected",
-          !s.proton_authenticated ? (s.proton_auth_warning ? "Proton Drive CLI problem" : "Sign in required") : s.proton_auth_warning ? "Session couldn't be verified" : ("Folder: " + (s.proton_folder || "—")), "cloud")
+          !s.proton_authenticated ? (s.proton_auth_warning ? t("dashboard.proton.unavailable") : t("common.signed_out")) : s.proton_auth_warning ? t("dashboard.proton.connected_unverified") : t("dashboard.proton.connected"),
+          !s.proton_authenticated ? (s.proton_auth_warning ? t("dashboard.proton.cli_problem") : t("dashboard.proton.sign_in_required")) : s.proton_auth_warning ? t("dashboard.proton.unverified") : t("common.folder", { folder: s.proton_folder || "—" }), "cloud")
       ])
     ]);
     // disable backup button if can't
     var bbtn = actions.querySelector(".btn");
-    if (!canBackup) { bbtn.setAttribute("disabled", ""); bbtn.title = "Sign in to Proton Drive first"; }
+    if (!canBackup) { bbtn.setAttribute("disabled", ""); bbtn.title = t("common.sign_in_first"); }
     host.appendChild(actions);
 
     // ---- Destinations ----
     var src = s.sources || {};
     var dests = ce("div", { class: "card" }, [
-      ce("h2", { text: "Where your backups live" }),
+      ce("h2", { text: t("dashboard.where_title") }),
       ce("div", { class: "grid cols-2" }, [
         destTile("home", "ha", "Home Assistant", src.HomeAssistant),
         destTile("cloud", "proton", "Proton Drive", src.ProtonDrive)
@@ -572,11 +620,11 @@
     var recent = (s.backups || []).slice().reverse().slice(0, 3);
     var peek = ce("div", { class: "card" }, [
       ce("div", { class: "card-head" }, [
-        ce("h2", { text: "Recent backups" }), ce("div", { class: "spacer" }),
-        ce("button", { class: "btn subtle sm", text: "View all", onclick: function () { state.tab = "backups"; render(); } })
+        ce("h2", { text: t("dashboard.recent") }), ce("div", { class: "spacer" }),
+        ce("button", { class: "btn subtle sm", text: t("dashboard.view_all"), onclick: function () { state.tab = "backups"; render(); } })
       ])
     ]);
-    if (!recent.length) peek.appendChild(emptyState("archive", "No backups yet", "Create your first backup to get started."));
+    if (!recent.length) peek.appendChild(emptyState("archive", t("common.no_backups"), t("dashboard.empty")));
     else recent.forEach(function (b) { peek.appendChild(backupCard(b, true)); });
     host.appendChild(peek);
   }
@@ -594,41 +642,42 @@
     var retained = info.retained || 0;
     var sub = [];
     if (info.size) sub.push(info.size);
-    if (info.max) sub.push("max " + info.max);
-    if (retained) sub.push(retained + " kept");
+    if (info.max) sub.push(t("dashboard.dest.max", { n: info.max }));
+    if (retained) sub.push(t("dashboard.dest.kept", { n: retained }));
     var badge = ce("div", { class: "badge-ico " + cls }); badge.innerHTML = icon(ic);
     return ce("div", { class: "dest" }, [
       badge,
       ce("div", {}, [ce("div", { class: "name", text: name }), ce("div", { class: "meta", text: sub.join(" · ") || "—" })]),
-      ce("div", { class: "count" }, [ce("b", { text: String(count) }), ce("span", { text: count === 1 ? "backup" : "backups" })])
+      ce("div", { class: "count" }, [ce("b", { text: String(count) }), ce("span", { text: t("dashboard.dest.backups", { n: count }) })])
     ]);
   }
 
   // ---- Banners ----
   function activityTitle(s) {
-    if ((s.backups || []).some(function (b) { return b.isPending; })) return "Creating a backup…";
+    if ((s.backups || []).some(function (b) { return b.isPending; })) return t("activity.creating");
     var active = (s.backups || []).filter(isActive)[0];
     if (active) {
       var dest = (active.upload_info && active.upload_info.name) || "Proton Drive";
-      return dest === "Home Assistant" ? "Downloading to Home Assistant" : "Uploading to " + dest;
+      return dest === "Home Assistant" ? t("activity.downloading_to_ha") : t("activity.uploading_to", { dest: dest });
     }
-    return "Syncing with Proton Drive…";
+    return t("activity.syncing");
   }
   function activityMessage(s) {
     var pending = (s.backups || []).filter(function (b) { return b.isPending; });
-    if (pending.length) return "Home Assistant is building the backup archive. This can take a while for large installs.";
+    if (pending.length) return t("activity.building");
     var uploading = (s.backups || []).filter(isActive);
     if (uploading.length) {
       var b = uploading[0], up = b.upload_info, pct = clampPct(up.progress);
       var toHA = up.name === "Home Assistant";
       if (pct >= 100) {
-        return toHA ? b.name + " — finishing download to Home Assistant."
-                    : b.name + " — uploading to " + (up.name || "Proton Drive") + " (large backups can take several minutes).";
+        return toHA ? t("activity.finishing_download", { name: b.name })
+                    : t("activity.uploading_slow", { name: b.name, dest: up.name || "Proton Drive" });
       }
       var sp = fmtSpeed(up.speed);
-      return b.name + " — " + (toHA ? "downloading " : "preparing ") + pct + "%" + (sp ? " · " + sp : "");
+      var msg = t(toHA ? "activity.downloading_pct" : "activity.preparing_pct", { name: b.name, pct: I18n.percent(pct) });
+      return sp ? msg + " · " + sp : msg;
     }
-    return "Checking backups and applying your retention rules.";
+    return t("activity.checking");
   }
   function renderActivityBanner(host, s) {
     if (!s.syncing && !(s.backups || []).some(isActive)) return;
@@ -644,41 +693,37 @@
 
   function renderCooldownBanner(host, s) {
     if (!s.backup_cooldown_active) return;
-    host.appendChild(banner("warn", "clock", "Startup cooldown active",
-      "New backups are paused briefly after start-up to let Home Assistant settle.",
-      [{ label: "Back up now anyway", cls: "btn", fn: function () { action(api("/ignorestartupcooldown", { method: "POST" }), "Skipping cooldown — starting now"); } }]));
+    host.appendChild(banner("warn", "clock", t("cooldown.title"), t("cooldown.message"),
+      [{ label: t("cooldown.action"), cls: "btn", fn: function () { action(api("/ignorestartupcooldown", { method: "POST" }), t("toast.cooldown_skipped")); } }]));
   }
 
   function renderAuthBanner(host, s) {
     if (!s.enable_proton_upload) return;
     if (s.proton_authenticated && s.proton_auth_warning) {
-      host.appendChild(banner("warn", "cloud", "Proton Drive session couldn't be verified",
-        "The last check failed: " + s.proton_auth_warning +
-        " Backups will still be attempted; if they keep failing, sign in again.",
-        [{ label: "Sign in again", cls: "btn", fn: openLogin },
-         { label: "Sign out", cls: "btn ghost", fn: openProtonLogout }]));
+      host.appendChild(banner("warn", "cloud", t("auth.unverified.title"),
+        t("auth.unverified.message", { warning: sentence(s.proton_auth_warning) }),
+        [{ label: t("common.sign_in_again"), cls: "btn", fn: openLogin },
+         { label: t("common.sign_out"), cls: "btn ghost", fn: openProtonLogout }]));
       return;
     }
     if (s.proton_authenticated) return;
     if (s.proton_auth_warning) {
       // e.g. the CLI binary crashing before it can even answer: signing in
       // isn't the fix, so don't lead with it.
-      host.appendChild(banner("warn", "cloud", "Proton Drive isn't working",
+      host.appendChild(banner("warn", "cloud", t("auth.broken.title"),
         s.proton_auth_warning,
-        [{ label: "Sign in to Proton", cls: "btn ghost", fn: openLogin }]));
+        [{ label: t("common.sign_in_to_proton"), cls: "btn ghost", fn: openLogin }]));
       return;
     }
-    host.appendChild(banner("warn", "cloud", "Not signed in to Proton Drive",
-      "Backups can be created in Home Assistant, but they won't be uploaded until you sign in to Proton Drive.",
-      [{ label: "Sign in to Proton", cls: "btn", fn: openLogin }]));
+    host.appendChild(banner("warn", "cloud", t("auth.signed_out.title"), t("auth.signed_out.message"),
+      [{ label: t("common.sign_in_to_proton"), cls: "btn", fn: openLogin }]));
   }
 
   function renderErrorBanner(host, s) {
     var e = s.last_error;
     if (!e) return;
     if (e.error_type === "please_wait") {
-      host.appendChild(banner("info", "clock", "Waiting for the current sync to finish",
-        "Your last action is queued and will run as soon as the in-progress sync completes.", []));
+      host.appendChild(banner("info", "clock", t("error.please_wait.title"), t("error.please_wait.queued"), []));
       return;
     }
     var actions = resolutionsFor(e);
@@ -686,44 +731,68 @@
       iconNode("alert", "b-ico"),
       ce("div", { class: "b-body" }, [
         ce("div", { class: "b-title", text: errorTitle(e) }),
-        ce("div", { class: "b-msg", text: e.message || "An error occurred." }),
-        s.last_error_count > 1 ? ce("div", { class: "muted", style: "font-size:.8rem;margin-top:6px", text: "Happened " + s.last_error_count + " times in a row." }) : null,
+        ce("div", { class: "b-msg", text: errText(e, "error.generic.message") }),
+        s.last_error_count > 1 ? ce("div", { class: "muted", style: "font-size:.8rem;margin-top:6px", text: t("error.repeated", { n: s.last_error_count }) }) : null,
         ce("div", { class: "b-actions" }, actions.map(function (a) {
           return ce("button", { class: a.cls || "btn ghost", text: a.label, onclick: a.fn });
         }).concat([
-          ce("button", { class: "btn subtle", text: "Details", onclick: function () { openErrorDetails(e); } })
+          ce("button", { class: "btn subtle", text: t("common.details"), onclick: function () { openErrorDetails(e); } })
         ]))
       ])
     ]);
     host.appendChild(b);
   }
 
+  // Errors share a title per kind; the rest get the generic one.
+  var ERROR_TITLE_ALIASES = { proton_timeout: "proton_cant_connect", drive_full: "low_space" };
   function errorTitle(e) {
-    switch (e.error_type) {
-      case "proton_not_authenticated": return "Proton Drive sign-in needed";
-      case "proton_cant_connect": case "proton_timeout": return "Can't reach Proton Drive";
-      case "multiple_deletes": return "Confirm deleting multiple backups";
-      case "low_space": case "drive_full": return "Low on space";
-      default: return "Something needs your attention";
+    var type = ERROR_TITLE_ALIASES[e.error_type] || e.error_type;
+    return I18n.has("error." + type + ".title") ? t("error." + type + ".title") : t("error.generic.title");
+  }
+  // The text for a backend error: translated by error_type when its message is
+  // fixed (error.<type>.message, filled from the error's data), otherwise the
+  // backend's own English message. Error pages from Home Assistant or a proxy
+  // (plainError) and browser exceptions (fetch failures) get translated text
+  // instead of e.g. "401: Unauthorized" or "Failed to fetch".
+  // Backend text dropped into the middle of a translated sentence needs its own
+  // full stop; the Proton CLI's warnings don't always end with one.
+  function sentence(text) {
+    text = String(text == null ? "" : text).trim();
+    return !text || /[.!?…]$/.test(text) ? text : text + ".";
+  }
+  function errText(e, fallbackKey) {
+    if (e && e.error_type) {
+      var key = "error." + e.error_type + ".message";
+      var data = e.data || {};
+      if (e.error_type === "illegal_config") {
+        // A rejected setting: name it as the settings form does.
+        var label = "setting." + data.key + ".label";
+        data = { value: data.value, setting: I18n.has(label) ? t(label) : data.key };
+      }
+      if (I18n.has(key)) return t(key, data);
     }
+    if (e && e.message_key) return t(e.message_key);
+    // The add-on's own plain-text errors (see plainError).
+    if (e && !(e instanceof Error) && e.message) return e.message;
+    return t(fallbackKey);
   }
   function resolutionsFor(e) {
     var out = [];
     switch (e.error_type) {
       case "proton_not_authenticated":
-        out.push({ label: "Sign in to Proton", cls: "btn", fn: openLogin }); break;
+        out.push({ label: t("common.sign_in_to_proton"), cls: "btn", fn: openLogin }); break;
       case "proton_cant_connect": case "proton_timeout":
-        out.push({ label: "Retry now", cls: "btn", fn: doSync }); break;
+        out.push({ label: t("common.retry_now"), cls: "btn", fn: doSync }); break;
       case "multiple_deletes":
-        out.push({ label: "Delete them, just this once", cls: "btn", fn: function () { action(api("/confirmdelete", { method: "POST" }), "Confirmed — cleaning up"); } });
-        out.push({ label: "Always allow", cls: "btn ghost", fn: function () { action(api("/confirmdelete?always=true", { method: "POST" }), "Saved — I won't ask again"); } });
+        out.push({ label: t("error.multiple_deletes.once"), cls: "btn", fn: function () { action(api("/confirmdelete", { method: "POST" }), t("toast.deletes_confirmed")); } });
+        out.push({ label: t("error.multiple_deletes.always"), cls: "btn ghost", fn: function () { action(api("/confirmdelete?always=true", { method: "POST" }), t("toast.deletes_always")); } });
         break;
       case "low_space": case "drive_full":
-        out.push({ label: "Skip the space check", cls: "btn", fn: function () { action(api("/skipspacecheck", { method: "POST" }), "Skipping space check"); } });
+        out.push({ label: t("error.low_space.skip"), cls: "btn", fn: function () { action(api("/skipspacecheck", { method: "POST" }), t("toast.space_check_skipped")); } });
         break;
       default:
-        out.push({ label: "Retry now", cls: "btn", fn: doSync });
-        out.push({ label: "Report a bug", cls: "btn ghost", fn: openBugReport });
+        out.push({ label: t("common.retry_now"), cls: "btn", fn: doSync });
+        out.push({ label: t("common.report_bug"), cls: "btn ghost", fn: openBugReport });
     }
     return out;
   }
@@ -751,15 +820,41 @@
 
     var card = ce("div", { class: "card" }, [
       ce("div", { class: "card-head" }, [
-        ce("h2", { text: "Backups (" + (s.backups || []).length + ")" }),
+        ce("h2", { text: t("backups.title", { n: (s.backups || []).length }) }),
         ce("div", { class: "spacer" }),
-        ce("button", { class: "btn", onclick: openCreateBackup }, [iconNode("plus"), ce("span", { text: "Back up now" })])
+        ce("button", { class: "btn", onclick: openCreateBackup }, [iconNode("plus"), ce("span", { text: t("common.back_up_now") })])
       ])
     ]);
     var list = (s.backups || []).slice().reverse();
-    if (!list.length) card.appendChild(emptyState("archive", "No backups yet", "Create a backup now or wait for the next scheduled run."));
+    if (!list.length) card.appendChild(emptyState("archive", t("common.no_backups"), t("backups.empty")));
     else list.forEach(function (b) { card.appendChild(backupCard(b, false)); });
     host.appendChild(card);
+  }
+
+  // The backend's backup statuses (Backup.status() and the overrides set on
+  // transfers) are English; known ones are translated, anything else is shown
+  // as sent.
+  var STATUS_KEYS = {
+    "Backed Up": "status.backed_up",
+    "Proton Drive Only": "status.proton_only",
+    "HA Only": "status.ha_only",
+    "Created": "status.created",
+    "Deleted": "status.deleted",
+    "Pending": "status.pending",
+    "Failed!": "status.failed",
+    "Uploading to Proton Drive": "status.uploading",
+    "Upload to Proton Drive failed": "status.upload_failed",
+    "Upload to Proton Drive didn't start — try again": "status.upload_not_started"
+  };
+  function statusText(status) {
+    if (!status) return status;
+    if (STATUS_KEYS[status]) return t(STATUS_KEYS[status]);
+    var m = /^(Loading|Downloading) (\d+(?:\.\d+)?)%$/.exec(status);
+    if (m) return t(m[1] === "Loading" ? "status.loading_pct" : "status.downloading_pct", { pct: I18n.percent(Number(m[2])) });
+    return status;
+  }
+  function typeText(type) {
+    return type && I18n.has("backups.type." + type) ? t("backups.type." + type) : (type || t("backups.type.backup"));
   }
 
   function backupCard(b, compact) {
@@ -769,28 +864,28 @@
     if (b.upload_info && typeof b.upload_info.progress === "number") cls += " uploading";
 
     var sub = [];
-    sub.push(b.date);
+    sub.push(I18n.dateTime(b.timestamp) || b.date);
     if (b.size) sub.push(b.size);
-    if (b.haVersion) sub.push("HA " + b.haVersion);
+    if (b.haVersion) sub.push(t("backups.ha_version", { version: b.haVersion }));
     var subRow = ce("div", { class: "backup-sub" }, sub.map(function (x) { return ce("span", { text: x }); }));
 
     // Badges: type, locations, retained, status, delete-next
     var badges = ce("div", { class: "backup-badges" });
-    badges.appendChild(pill(b.type === "full" ? "accent" : "neutral", null, (b.type || "backup")));
+    badges.appendChild(pill(b.type === "full" ? "accent" : "neutral", null, typeText(b.type)));
     (b.sources || []).forEach(function (src) {
       var isHa = src.key === "HomeAssistant";
       var loc = ce("span", { class: "loc " + (isHa ? "ha" : "proton") }, [
         iconNode(isHa ? "home" : "cloud"),
         ce("span", { text: isHa ? "Home Assistant" : "Proton Drive" })
       ]);
-      if (src.retained) loc.appendChild(ce("span", { class: "tag", text: "kept" }));
-      if (src.delete_next) loc.appendChild(ce("span", { class: "tag", text: "next to delete" }));
+      if (src.retained) loc.appendChild(ce("span", { class: "tag", text: t("backups.tag.kept") }));
+      if (src.delete_next) loc.appendChild(ce("span", { class: "tag", text: t("backups.tag.next_to_delete") }));
       badges.appendChild(loc);
     });
-    if (b.protected) badges.appendChild(pill("neutral", "shield", "encrypted"));
-    if (b.ignored) badges.appendChild(pill("neutral", "ignore", "ignored"));
-    if (b.isPending) badges.appendChild(pill("info", "clock", "creating…"));
-    else if (b.status && !(b.upload_info && b.upload_info.progress != null)) badges.appendChild(pill("info", null, b.status));
+    if (b.protected) badges.appendChild(pill("neutral", "shield", t("backups.pill.encrypted")));
+    if (b.ignored) badges.appendChild(pill("neutral", "ignore", t("backups.pill.ignored")));
+    if (b.isPending) badges.appendChild(pill("info", "clock", t("backups.pill.creating")));
+    else if (b.status && !(b.upload_info && b.upload_info.progress != null)) badges.appendChild(pill("info", null, statusText(b.status)));
 
     var card = ce("div", { class: cls }, [
       ce("div", { class: "backup-top" }, [
@@ -808,7 +903,7 @@
 
     // Upload progress
     if (b.upload_info && typeof b.upload_info.progress === "number") card.appendChild(uploadProgress(b.slug, b.upload_info));
-    else if (b.isPending) card.appendChild(uploadIndeterminate("Creating backup…"));
+    else if (b.isPending) card.appendChild(uploadIndeterminate(t("backups.creating")));
 
     // Primary action row (only on full list, not compact peek)
     if (!compact) card.appendChild(backupActions(b));
@@ -826,16 +921,16 @@
     // (total ÷ elapsed) "speed".
     if (pct >= 100) {
       return ce("div", { class: "upload", "data-upload-slug": slug }, [
-        ce("div", { class: "u-head" }, [ce("span", { text: (toHA ? "Finishing download to " : "Uploading to ") + dest + "…" }), ce("b", { html: '<span class="spinner-inline"></span>' })]),
+        ce("div", { class: "u-head" }, [ce("span", { text: toHA ? t("upload.finishing_to_ha") : t("upload.uploading_to", { dest: dest }) }), ce("b", { html: '<span class="spinner-inline"></span>' })]),
         ce("div", { class: "bar indeterminate" }, [ce("i")]),
         ce("div", { class: "u-foot" }, [
           ce("span", { class: "u-total", text: fmtBytes(up.total) }),
-          ce("span", { text: toHA ? "Almost done" : "Large backups can take several minutes" })
+          ce("span", { text: toHA ? t("upload.almost_done") : t("upload.can_take_minutes") })
         ])
       ]);
     }
     return ce("div", { class: "upload", "data-upload-slug": slug }, [
-      ce("div", { class: "u-head" }, [ce("span", { text: toHA ? "Downloading to Home Assistant…" : "Preparing for " + dest + "…" }), ce("b", { class: "u-pct", text: pct + "%" })]),
+      ce("div", { class: "u-head" }, [ce("span", { text: toHA ? t("upload.downloading_to_ha") : t("upload.preparing_for", { dest: dest }) }), ce("b", { class: "u-pct", text: I18n.percent(pct) })]),
       ce("div", { class: "bar" }, [ce("i", { style: "width:" + pct + "%" })]),
       ce("div", { class: "u-foot" }, [
         ce("span", { class: "u-total", text: fmtBytes(up.total) }),
@@ -853,18 +948,18 @@
   function backupActions(b) {
     var row = ce("div", { class: "backup-actions" });
     if (b.restorable) {
-      row.appendChild(ce("button", { class: "btn sm", onclick: function () { downloadBackup(b); } }, [iconNode("download"), ce("span", { text: "Download" })]));
-      row.appendChild(ce("button", { class: "btn ghost sm", onclick: function () { openRestore(b); } }, [iconNode("restore"), ce("span", { text: "Restore" })]));
+      row.appendChild(ce("button", { class: "btn sm", onclick: function () { downloadBackup(b); } }, [iconNode("download"), ce("span", { text: t("common.download") })]));
+      row.appendChild(ce("button", { class: "btn ghost sm", onclick: function () { openRestore(b); } }, [iconNode("restore"), ce("span", { text: t("backups.restore") })]));
     }
     if (b.uploadable) {
-      var ub = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackup(b); } }, [iconNode("download"), ce("span", { text: "Download to Home Assistant" })]);
-      if (!state.status.proton_authenticated) { ub.setAttribute("disabled", ""); ub.title = "Sign in to Proton Drive first"; }
+      var ub = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackup(b); } }, [iconNode("download"), ce("span", { text: t("backups.download_to_ha") })]);
+      if (!state.status.proton_authenticated) { ub.setAttribute("disabled", ""); ub.title = t("common.sign_in_first"); }
       row.appendChild(ub);
     }
     var inProton = (b.sources || []).some(function (s) { return s.key === "ProtonDrive"; });
     if (b.restorable && !inProton && !isActive(b) && state.status.enable_proton_upload) {
-      var pb = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackupToProton(b); } }, [iconNode("upload"), ce("span", { text: "Upload to Proton Drive" })]);
-      if (!state.status.proton_authenticated) { pb.setAttribute("disabled", ""); pb.title = "Sign in to Proton Drive first"; }
+      var pb = ce("button", { class: "btn ghost sm", onclick: function () { uploadBackupToProton(b); } }, [iconNode("upload"), ce("span", { text: t("backups.upload_to_proton") })]);
+      if (!state.status.proton_authenticated) { pb.setAttribute("disabled", ""); pb.title = t("common.sign_in_first"); }
       row.appendChild(pb);
     }
     return row;
@@ -872,7 +967,7 @@
 
   function backupMenu(b) {
     var wrap = ce("div", { class: "backup-menu" });
-    var btn = ce("button", { class: "btn subtle icon", "aria-label": "More actions", "aria-haspopup": "menu", "aria-expanded": "false", html: icon("dots") });
+    var btn = ce("button", { class: "btn subtle icon", "aria-label": t("backups.menu.more"), "aria-haspopup": "menu", "aria-expanded": "false", html: icon("dots") });
     var open = false, menu = null;
     function close(restoreFocus) {
       if (menu) { menu.remove(); menu = null; }
@@ -885,16 +980,17 @@
     function items() { return menu ? Array.prototype.slice.call(menu.querySelectorAll("button")) : []; }
     function openMenu(focusFirst) {
       menu = ce("div", { class: "menu", role: "menu" });
-      addItem(menu, "note", b.note ? "Edit note" : "Add note", function () { openNote(b); });
+      addItem(menu, "note", b.note ? t("backups.menu.edit_note") : t("backups.menu.add_note"), function () { openNote(b); });
       // Retain toggles per source
       (b.sources || []).forEach(function (src) {
-        var label = (src.retained ? "Stop keeping in " : "Keep in ") + (src.key === "HomeAssistant" ? "Home Assistant" : "Proton Drive");
+        var place = src.key === "HomeAssistant" ? "Home Assistant" : "Proton Drive";
+        var label = t(src.retained ? "backups.menu.stop_keeping" : "backups.menu.keep", { place: place });
         addItem(menu, "pin", label, function () { toggleRetain(b, src.key, !src.retained); });
       });
-      addItem(menu, b.ignored ? "eye" : "ignore", b.ignored ? "Un-ignore" : "Ignore", function () { toggleIgnore(b, !b.ignored); });
-      addItem(menu, "info", "Details", function () { openDetails(b); });
+      addItem(menu, b.ignored ? "eye" : "ignore", b.ignored ? t("backups.menu.unignore") : t("backups.menu.ignore"), function () { toggleIgnore(b, !b.ignored); });
+      addItem(menu, "info", t("common.details"), function () { openDetails(b); });
       menu.appendChild(ce("hr"));
-      addItem(menu, "trash", "Delete…", function () { openDelete(b); }, true);
+      addItem(menu, "trash", t("backups.menu.delete"), function () { openDelete(b); }, true);
       // Arrow-key navigation + Escape, per the ARIA menu pattern.
       menu.addEventListener("keydown", function (ev) {
         var list = items(), i = list.indexOf(document.activeElement);
@@ -933,17 +1029,19 @@
     if (MOCK) { toast("Download started (mock)", "info"); return; }
     var a = ce("a", { href: href, download: "" }); document.body.appendChild(a); a.click(); a.remove();
   }
-  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug), { method: "POST" }), "Downloading to Home Assistant in the background"); }
-  function uploadBackupToProton(b) { action(api("/uploadToProton?slug=" + encodeURIComponent(b.slug), { method: "POST" }), "Uploading to Proton Drive in the background"); }
+  function uploadBackup(b) { action(api("/upload?slug=" + encodeURIComponent(b.slug), { method: "POST" }), t("toast.downloading_to_ha")); }
+  function uploadBackupToProton(b) { action(api("/uploadToProton?slug=" + encodeURIComponent(b.slug), { method: "POST" }), t("toast.uploading_to_proton")); }
   function toggleRetain(b, sourceKey, value) {
     var sources = {}; (b.sources || []).forEach(function (s) { sources[s.key] = !!s.retained; });
     sources[sourceKey] = value;
-    action(apiJson("/retain", { slug: b.slug, sources: sources }), value ? "This backup will be kept" : "This backup is no longer pinned");
+    action(apiJson("/retain", { slug: b.slug, sources: sources }), value ? t("toast.kept") : t("toast.unkept"));
   }
-  function toggleIgnore(b, value) { action(apiJson("/ignore", { slug: b.slug, ignore: value })); }
+  function toggleIgnore(b, value) {
+    action(apiJson("/ignore", { slug: b.slug, ignore: value }), t(value ? "toast.ignored" : "toast.included", { name: b.name }));
+  }
   function doSync() {
-    if (state.status && state.status.syncing) { toast("A sync is already running", "info"); return; }
-    action(api("/startSync", { method: "POST" }), "Sync started").catch(function () {});
+    if (state.status && state.status.syncing) { toast(t("toast.sync_already_running"), "info"); return; }
+    action(api("/startSync", { method: "POST" }), t("toast.sync_started")).catch(function () {});
   }
 
   // ------------------------------------------------------------------------
@@ -953,121 +1051,118 @@
   // maps it back (PASSWORD_PLACEHOLDER in uiserver.py).
   var PASSWORD_PLACEHOLDER = "<unchanged>";
 
+  // Text comes from the catalogs, by key: settings.group.<id>.title/.desc and
+  // setting.<key>.label/.help/.placeholder (help and placeholder optional).
   var SETTINGS_GROUPS = [
     {
-      title: "Backup schedule", icon: "clock",
-      desc: "How often backups are made and how many are kept.",
+      id: "schedule", icon: "clock",
       fields: [
-        { key: "days_between_backups", label: "Days between backups", type: "number", step: "0.1", min: 0, help: "How frequently a new backup is created. 0 disables scheduled backups." },
-        { key: "backup_time_of_day", label: "Time of day", type: "time", help: "Local time to create scheduled backups. Leave blank for any time." },
-        { key: "max_backups_in_ha", label: "Keep in Home Assistant", type: "number", min: 0, help: "Most recent backups to keep on this Home Assistant machine; the oldest is deleted first. 0 means never delete from Home Assistant — to keep no local copies, enable \"Delete from Home Assistant after upload\" instead." },
-        { key: "max_backups_in_proton_drive", label: "Keep in Proton Drive", type: "number", min: 0, help: "Most recent backups to keep in Proton Drive; the oldest is deleted first. 0 means never delete from Proton Drive." },
-        { key: "backup_name", label: "Naming template", type: "text", help: "Template for backup names. Placeholders are shown below.", template: true },
-        { key: "backup_password", label: "Backup password", type: "password", help: "Optionally encrypt backups with a password. Leave blank for none." },
-        { key: "delete_before_new_backup", label: "Delete old backup before making a new one", type: "bool", help: "Useful when disk space is tight — removes the oldest backup first." },
-        { key: "call_backup_snapshot", label: 'Call backups "snapshots"', type: "bool", help: "Use the older term \"snapshot\" in notifications and sensors." }
+        // step "any": a value from the Configuration tab like 0.25 failed
+        // step 0.1's check, so the browser refused to submit the whole form.
+        { key: "days_between_backups", type: "number", step: "any", min: 0 },
+        { key: "backup_time_of_day", type: "time" },
+        { key: "max_backups_in_ha", type: "number", min: 0 },
+        { key: "max_backups_in_proton_drive", type: "number", min: 0 },
+        { key: "backup_name", type: "text", template: true },
+        { key: "backup_password", type: "password" },
+        { key: "delete_before_new_backup", type: "bool" },
+        { key: "call_backup_snapshot", type: "bool" }
       ]
     },
     {
-      title: "Proton Drive", icon: "cloud",
-      desc: "Where and how backups are uploaded to Proton Drive.",
+      id: "proton", icon: "cloud",
       fields: [
-        { key: "enable_proton_upload", label: "Upload backups to Proton Drive", type: "bool", help: "When off, backups are only kept in Home Assistant." },
-        { key: "proton_folder_name", label: "Proton folder path", type: "text", help: "Folder in your Proton Drive where backups are stored. Use / to nest folders, e.g. backups/ha." },
-        { key: "delete_after_upload", label: "Delete from Home Assistant after upload", type: "bool", help: "Keep backups only in Proton Drive once uploaded." },
-        { key: "permanently_delete", label: "Permanently delete removed backups", type: "bool", help: "Also remove old backups from the Proton Drive trash, so they stop counting toward your storage quota. When off, removed backups pile up in the trash (using quota) until you empty it yourself." },
-        { key: "upload_limit_bytes_per_second", label: "Upload speed limit", type: "text", advanced: true, placeholder: "e.g. 5 MB (empty = unlimited)", help: "Throttle uploads to Proton Drive, e.g. \"5 MB\" or \"500 KB\". Leave blank for unlimited." },
-        { key: "proton_drive_timeout_seconds", label: "CLI timeout (seconds)", type: "number", min: 1, advanced: true, help: "How long to wait for proton-drive commands." },
-        { key: "proton_transfer_timeout_seconds", label: "Transfer timeout (seconds)", type: "number", min: 1, advanced: true, help: "How long to wait for a single upload/download transfer." }
+        { key: "enable_proton_upload", type: "bool" },
+        { key: "proton_folder_name", type: "text" },
+        { key: "delete_after_upload", type: "bool" },
+        { key: "permanently_delete", type: "bool" },
+        { key: "proton_drive_timeout_seconds", type: "number", step: "any", min: 1, advanced: true },
+        { key: "proton_transfer_timeout_seconds", type: "number", step: "any", min: 1, advanced: true }
       ]
     },
     {
-      title: "What to back up", icon: "folder",
-      desc: "Choose which folders and add-ons are included.",
+      id: "contents", icon: "folder",
       fields: [
-        { key: "exclude_folders", label: "Exclude folders", type: "folders", help: "Folders to leave out of backups." },
-        { key: "exclude_addons", label: "Exclude add-ons", type: "addons", help: "Add-ons to leave out of backups." },
-        { key: "exclude_ha_database", label: "Exclude the Home Assistant database", type: "bool", help: "Skip home-assistant_v2.db to make backups smaller." }
+        { key: "exclude_folders", type: "folders" },
+        { key: "exclude_addons", type: "addons" },
+        { key: "exclude_ha_database", type: "bool" }
       ]
     },
     {
-      title: "Generational backups", icon: "archive",
-      desc: "Keep a spread of older backups (daily, weekly, monthly, yearly). While enabled, backups that don't fill one of these slots are deleted once a newer backup exists.",
+      id: "generational", icon: "archive",
       advanced: true,
       dynamicNote: generationalWarningText,
       fields: [
-        { key: "generational_days", label: "Daily backups to keep", type: "number", min: 0, help: "0 is treated as 1: the newest backup is always kept, and older backups survive only as weekly/monthly/yearly keepers." },
-        { key: "generational_weeks", label: "Weekly backups to keep", type: "number", min: 0 },
-        { key: "generational_months", label: "Monthly backups to keep", type: "number", min: 0 },
-        { key: "generational_years", label: "Yearly backups to keep", type: "number", min: 0 },
-        { key: "generational_day_of_week", label: "Weekly backup day", type: "select", options: [["mon", "Monday"], ["tue", "Tuesday"], ["wed", "Wednesday"], ["thu", "Thursday"], ["fri", "Friday"], ["sat", "Saturday"], ["sun", "Sunday"]] },
-        { key: "generational_day_of_month", label: "Monthly backup day (1–31)", type: "number", min: 1, max: 31 },
-        { key: "generational_day_of_year", label: "Yearly backup day (1–365)", type: "number", min: 1, max: 365 },
-        { key: "generational_delete_early", label: "Delete extra backups early", type: "bool", help: "Remove redundant backups before the count limit is hit." }
+        { key: "generational_days", type: "number", min: 0 },
+        { key: "generational_weeks", type: "number", min: 0 },
+        { key: "generational_months", type: "number", min: 0 },
+        { key: "generational_years", type: "number", min: 0 },
+        { key: "generational_day_of_week", type: "select", options: weekdayOpts },
+        { key: "generational_day_of_month", type: "number", min: 1, max: 31 },
+        { key: "generational_day_of_year", type: "number", min: 1, max: 365 },
+        { key: "generational_delete_early", type: "bool" }
       ]
     },
     {
-      title: "Stop add-ons during backup", icon: "bolt",
-      desc: "Optionally stop add-ons while a backup runs (useful for databases).",
+      id: "stop_addons", icon: "bolt",
       advanced: true,
       fields: [
-        { key: "stop_addons", label: "Stop these add-ons", type: "addons", help: "These add-ons are stopped before the backup and restarted afterwards." },
-        { key: "disable_watchdog_when_stopping", label: "Disable watchdog while stopped", type: "bool", help: "Prevents the supervisor from restarting add-ons mid-backup." }
+        { key: "stop_addons", type: "addons" }
       ]
     },
     {
-      title: "Notifications & sensors", icon: "info",
+      id: "notifications", icon: "info",
       fields: [
-        { key: "notify_for_stale_backups", label: "Notify when backups are stale", type: "bool", help: "Send a persistent notification if backups stop happening." },
-        { key: "enable_backup_stale_sensor", label: "Expose a \"stale\" binary sensor", type: "bool" },
-        { key: "enable_backup_state_sensor", label: "Expose a backup state sensor", type: "bool" }
+        { key: "notify_for_stale_backups", type: "bool" },
+        { key: "enable_backup_stale_sensor", type: "bool" },
+        { key: "enable_backup_state_sensor", type: "bool" }
       ]
     },
     {
-      title: "Other backups & retention", icon: "list", advanced: true,
+      id: "retention", icon: "list", advanced: true,
       fields: [
-        { key: "ignore_other_backups", label: "Ignore backups made elsewhere", type: "bool", help: "Don't manage or delete backups this add-on didn't create." },
-        { key: "ignore_upgrade_backups", label: "Ignore upgrade backups", type: "bool", help: "Don't count automatic backups Home Assistant makes during upgrades." },
-        { key: "delete_ignored_after_days", label: "Delete ignored backups after", type: "text", placeholder: "e.g. 30 days (empty = never)", help: "Automatically delete ignored backups after this long, e.g. \"30 days\". Leave blank to keep them forever." }
+        { key: "ignore_other_backups", type: "bool" },
+        { key: "ignore_upgrade_backups", type: "bool" },
+        { key: "delete_ignored_after_days", type: "text" }
       ]
     },
     {
-      title: "Appearance", icon: "eye",
-      desc: "Personalise the look of this UI. Changes apply after saving.",
+      id: "appearance", icon: "eye",
       fields: [
-        { key: "background_color", label: "Background color", type: "color" },
-        { key: "accent_color", label: "Accent color", type: "color" }
+        { key: "background_color", type: "color" },
+        { key: "accent_color", type: "color" }
       ]
     },
     {
-      title: "Server & networking", icon: "settings", advanced: true,
-      desc: "Expose an extra web server outside of Home Assistant ingress.",
+      id: "server", icon: "settings", advanced: true,
       fields: [
-        { key: "expose_extra_server", label: "Expose extra web server", type: "bool" },
-        { key: "require_login", label: "Require Home Assistant login", type: "bool" },
-        { key: "use_ssl", label: "Use SSL", type: "bool" },
-        { key: "certfile", label: "Certificate file", type: "text" },
-        { key: "keyfile", label: "Key file", type: "text" },
-        { key: "port", label: "Port", type: "number", min: 0 }
+        { key: "expose_extra_server", type: "bool" },
+        { key: "require_login", type: "bool" },
+        { key: "use_ssl", type: "bool" },
+        { key: "certfile", type: "text" },
+        { key: "keyfile", type: "text" },
+        { key: "port", type: "number", min: 0 }
       ]
     },
     {
-      title: "Advanced & diagnostics", icon: "bug", advanced: true,
+      id: "advanced", icon: "bug", advanced: true,
       fields: [
-        { key: "confirm_multiple_deletes", label: "Ask before deleting multiple backups", type: "bool" },
-        { key: "warn_for_low_space", label: "Warn when low on space", type: "bool" },
-        { key: "watch_backup_directory", label: "Watch the backup directory for changes", type: "bool" },
-        { key: "verbose", label: "Verbose logging", type: "bool" },
-        { key: "log_level", label: "Log level (file)", type: "select", options: enumOpts(["DEBUG", "TRACE", "INFO", "WARN", "WARNING", "CRITICAL"]) },
-        { key: "console_log_level", label: "Log level (console)", type: "select", options: enumOpts(["DEBUG", "TRACE", "INFO", "WARN", "WARNING", "CRITICAL"]) },
-        { key: "proton_cli_path", label: "proton-drive CLI path", type: "text" },
-        { key: "proton_data_path", label: "Proton data path", type: "text" },
-        { key: "max_sync_interval_seconds", label: "Max sync interval", type: "text", placeholder: "e.g. 3 hours", help: "Longest the add-on waits between syncs, e.g. \"3 hours\", \"90 minutes\" or \"1:30:00\"." },
-        { key: "maximum_upload_chunk_bytes", label: "Max upload chunk", type: "text", placeholder: "e.g. 10 MB", help: "Upload chunk size, e.g. \"10 MB\". Minimum 256 KB." }
+        { key: "confirm_multiple_deletes", type: "bool" },
+        { key: "warn_for_low_space", type: "bool" },
+        { key: "watch_backup_directory", type: "bool" },
+        { key: "log_level", type: "select", options: enumOpts(["DEBUG", "TRACE", "INFO", "WARN", "WARNING", "CRITICAL"]) },
+        { key: "console_log_level", type: "select", options: enumOpts(["DEBUG", "TRACE", "INFO", "WARN", "WARNING", "CRITICAL"]) },
+        { key: "proton_cli_path", type: "text" },
+        { key: "proton_data_path", type: "text" },
+        { key: "max_sync_interval_seconds", type: "text" }
       ]
     }
   ];
   function enumOpts(arr) { return arr.map(function (x) { return [x, x]; }); }
+  // Weekday names in the UI's language, built when the field renders.
+  function weekdayOpts() {
+    return ["mon", "tue", "wed", "thu", "fri", "sat", "sun"].map(function (d, i) { return [d, I18n.weekday(i)]; });
+  }
 
   // Effective (draft > saved > default) value of a setting being edited.
   function effVal(key) {
@@ -1086,31 +1181,30 @@
     var months = effNum("generational_months"), years = effNum("generational_years");
     if (days + weeks + months + years === 0) return null;
     var slots = Math.max(days, 1) + weeks + months + years;
-    var caps = [["max_backups_in_proton_drive", "Keep in Proton Drive"]];
+    var caps = ["max_backups_in_proton_drive"];
     // With delete-after-upload the HA cap never applies.
-    if (!effBool("delete_after_upload")) caps.unshift(["max_backups_in_ha", "Keep in Home Assistant"]);
+    if (!effBool("delete_after_upload")) caps.unshift("max_backups_in_ha");
     var tight = [];
-    caps.forEach(function (m) {
-      var cap = effNum(m[0]);
-      if (cap > 0 && cap < slots) tight.push("\"" + m[1] + "\" is " + cap);
+    caps.forEach(function (key) {
+      var cap = effNum(key);
+      if (cap > 0 && cap < slots) tight.push(t("settings.generational_warning.limit", { label: t("setting." + key + ".label"), n: cap }));
     });
     if (!tight.length) return null;
-    return "This plan can keep up to " + slots + " backups, but " + tight.join(" and ") +
-      ". The oldest generational backups will still be deleted to stay under that limit.";
+    return t("settings.generational_warning.text", { n: slots, limits: I18n.list(tight) });
   }
 
   var showAdvanced = false;
 
   function viewSettings(host) {
     if (!state.config) {
-      host.appendChild(ce("div", { class: "card" }, [centerSpinner("Loading settings…")]));
+      host.appendChild(ce("div", { class: "card" }, [centerSpinner(t("settings.loading"))]));
       return;
     }
     var cfg = state.config.config || {};
     var card = ce("div", { class: "card" });
     card.appendChild(ce("div", { class: "card-head" }, [
-      ce("h2", { text: "Settings" }), ce("div", { class: "spacer" }),
-      switchControl("Show advanced", showAdvanced, function (v) { showAdvanced = v; renderView(); })
+      ce("h2", { text: t("tab.settings") }), ce("div", { class: "spacer" }),
+      switchControl(t("settings.show_advanced"), showAdvanced, function (v) { showAdvanced = v; renderView(); })
     ]));
 
     var form = ce("form", { id: "settings-form", onsubmit: function (e) { e.preventDefault(); saveConfig(); } });
@@ -1120,7 +1214,8 @@
       if (!showAdvanced && g.advanced) return;
       if (!fields.length) return;
       var body = ce("div", { class: "group-body" });
-      if (g.desc) body.appendChild(ce("div", { class: "group-desc", text: g.desc }));
+      var descKey = "settings.group." + g.id + ".desc";
+      if (I18n.has(descKey)) body.appendChild(ce("div", { class: "group-desc", text: t(descKey) }));
       if (g.dynamicNote) {
         var note = ce("div", { class: "group-warning", style: "display:none" });
         note._compute = g.dynamicNote;
@@ -1128,15 +1223,15 @@
       }
       fields.forEach(function (f) { body.appendChild(renderField(f, cfg)); });
       var grp = ce("details", { class: "settings-group", open: true }, [
-        ce("summary", {}, [iconNode(g.icon), ce("span", { text: g.title }), ce("span", { class: "chev", html: icon("chev") })]),
+        ce("summary", {}, [iconNode(g.icon), ce("span", { text: t("settings.group." + g.id + ".title") }), ce("span", { class: "chev", html: icon("chev") })]),
         body
       ]);
       form.appendChild(grp);
     });
 
     form.appendChild(ce("div", { class: "settings-actions" }, [
-      ce("button", { class: "btn", type: "submit" }, [iconNode("check"), ce("span", { text: "Save settings" })]),
-      ce("button", { class: "btn ghost", type: "button", text: "Reset", onclick: function () { state.configDraft = {}; renderView(); } })
+      ce("button", { class: "btn", type: "submit" }, [iconNode("check"), ce("span", { text: t("settings.save") })]),
+      ce("button", { class: "btn ghost", type: "button", text: t("settings.reset"), onclick: function () { state.configDraft = {}; state.badNumbers = {}; renderView(); } })
     ]));
     // Field listeners fire on the target first, so drafts are current here.
     function refreshNotes() {
@@ -1161,20 +1256,23 @@
     var defs = (state.config && state.config.defaults) || {};
     var wrap = ce("div", { class: "field" });
     var id = "set-" + f.key;
+    var label = t("setting." + f.key + ".label");
+    var helpKey = "setting." + f.key + ".help", placeholderKey = "setting." + f.key + ".placeholder";
+    var help = I18n.has(helpKey) ? t(helpKey) : null;
 
     if (f.type === "bool") {
-      wrap.appendChild(ce("div", {}, [switchControl(f.label, !!val, function (v) { draft[f.key] = v; }, id, f.key)]));
-      if (f.help) wrap.appendChild(ce("div", { class: "help", text: f.help }));
+      wrap.appendChild(ce("div", {}, [switchControl(label, !!val, function (v) { draft[f.key] = v; }, id, f.key)]));
+      if (help) wrap.appendChild(ce("div", { class: "help", text: help }));
       return wrap;
     }
 
-    wrap.appendChild(ce("label", { for: id, text: f.label }));
-    if (f.help) wrap.appendChild(ce("div", { class: "help", text: f.help }));
+    wrap.appendChild(ce("label", { for: id, text: label }));
+    if (help) wrap.appendChild(ce("div", { class: "help", text: help }));
 
     if (f.type === "select") {
       var sel = ce("select", { id: id, "data-key": f.key });
-      sel.appendChild(ce("option", { value: "", text: "— default —" }));
-      f.options.forEach(function (o) { sel.appendChild(ce("option", { value: o[0], text: o[1] })); });
+      sel.appendChild(ce("option", { value: "", text: t("settings.default_option") }));
+      (typeof f.options === "function" ? f.options() : f.options).forEach(function (o) { sel.appendChild(ce("option", { value: o[0], text: o[1] })); });
       sel.value = val != null ? String(val) : "";
       sel.addEventListener("change", function () { draft[f.key] = sel.value; });
       wrap.appendChild(sel);
@@ -1199,12 +1297,21 @@
       if (f.min != null) attrs.min = f.min;
       if (f.max != null) attrs.max = f.max;
       if (f.step != null) attrs.step = f.step;
-      if (f.placeholder) attrs.placeholder = f.placeholder;
-      else if (defs[f.key] != null && defs[f.key] !== "") attrs.placeholder = "default: " + defs[f.key];
+      if (I18n.has(placeholderKey)) attrs.placeholder = t(placeholderKey);
+      else if (defs[f.key] != null && defs[f.key] !== "") attrs.placeholder = t("settings.default_placeholder", { value: defs[f.key] });
       var input = ce("input", attrs);
+      // Rebuilt from the draft or saved value, which is a number.
+      delete state.badNumbers[f.key];
       // Empty = "use the default": drafted as "" (never Number("") = 0, which
       // fields with a minimum reject), and collectConfig doesn't send it.
       input.addEventListener("input", function () {
+        // Text the browser can't read as a number ("0,5" where the decimal
+        // mark is a point, "1e400") also reads as "", but isn't "use the
+        // default": keep the draft and refuse to save (saveConfig).  While the
+        // field is shown, the browser refuses too; hidden by "Show advanced",
+        // it would otherwise have been reset to its default.
+        if (f.type === "number" && input.validity.badInput) { state.badNumbers[f.key] = true; return; }
+        delete state.badNumbers[f.key];
         draft[f.key] = f.type === "number" && input.value !== "" ? Number(input.value) : input.value;
       });
       if (f.type === "password" && val === PASSWORD_PLACEHOLDER) {
@@ -1234,17 +1341,28 @@
     return box;
   }
 
+  // The backend sends folder names and descriptions in English (FOLDERS in
+  // backup/const.py); translate them by slug.
+  var FOLDER_TEXT = {
+    "homeassistant": ["folder.homeassistant.name", "folder.homeassistant.desc"],
+    "media": ["folder.media.name", "folder.media.desc"],
+    "ssl": ["folder.ssl.name", "folder.ssl.desc"],
+    "share": ["folder.share.name", "folder.share.desc"],
+    "addons/local": ["folder.addons_local.name", "folder.addons_local.desc"]
+  };
   function multiCheck(f, val) {
     var items = f.type === "folders" ? (state.config.folders || []) : (state.config.addons || []);
     var selected = parseCsv(val);
     var box = ce("div", { class: "checks", "data-multi": f.key, "data-kind": f.type });
-    if (!items.length) { box.appendChild(ce("div", { class: "help", text: f.type === "addons" ? "No add-ons detected." : "No folders available." })); return box; }
+    if (!items.length) { box.appendChild(ce("div", { class: "help", text: f.type === "addons" ? t("settings.no_addons") : t("settings.no_folders") })); return box; }
     items.forEach(function (it) {
       var slug = it.slug;
-      var name = it.name || it.slug;
+      var text = f.type === "folders" ? FOLDER_TEXT[slug] : null;
+      var name = text ? t(text[0]) : (it.name || it.slug);
+      var desc = text ? t(text[1]) : it.description;
       var lbl = ce("label", {}, [
         ce("input", { type: "checkbox", value: slug, checked: selected.indexOf(slug) >= 0 }),
-        ce("div", {}, [ce("div", { class: "cx-name", text: name }), it.description ? ce("div", { class: "cx-desc", text: it.description }) : (it.version ? ce("div", { class: "cx-desc", text: "v" + it.version }) : null)])
+        ce("div", {}, [ce("div", { class: "cx-name", text: name }), desc ? ce("div", { class: "cx-desc", text: desc }) : (it.version ? ce("div", { class: "cx-desc", text: "v" + it.version }) : null)])
       ]);
       box.appendChild(lbl);
     });
@@ -1258,7 +1376,23 @@
 
   function loadConfig() {
     withBusy(api("/getconfig")).then(function (d) { state.config = d; if (state.tab === "settings") renderView(); })
-      .catch(function (e) { toast((e && e.message) || "Couldn't load settings", "bad"); });
+      .catch(function (e) { toast(errText(e, "settings.load_failed"), "bad"); });
+  }
+
+  // A save that reloads the page (reload_page: the colours, for one) should
+  // come back to Settings, not the dashboard. The note is only good for a few
+  // seconds, so a reload that never came back doesn't redirect a later visit.
+  // sessionStorage throws where storage is blocked; the dashboard is fine then.
+  var RETURN_KEY = "protonDriveBackup.returnToSettings";
+  function returnToSettings() {
+    try { sessionStorage.setItem(RETURN_KEY, String(Date.now())); } catch (e) {}
+  }
+  function returningToSettings() {
+    try {
+      var since = Date.now() - Number(sessionStorage.getItem(RETURN_KEY));
+      sessionStorage.removeItem(RETURN_KEY);
+      return since >= 0 && since < 30000;
+    } catch (e) { return false; }
   }
 
   function collectConfig() {
@@ -1299,22 +1433,26 @@
   }
 
   function saveConfig() {
+    var bad = Object.keys(state.badNumbers);
+    if (bad.length) { toast(t("settings.bad_number", { setting: t("setting." + bad[0] + ".label") }), "bad"); return; }
     var cfg = collectConfig();
     var btn = el('#settings-form button[type="submit"]');
-    if (btn) { btn.setAttribute("disabled", ""); btn.querySelector("span").textContent = "Saving…"; }
+    if (btn) { btn.setAttribute("disabled", ""); btn.querySelector("span").textContent = t("settings.saving"); }
     setBusy(true);
     apiJson("/saveconfig", { config: cfg }).then(function (d) {
-      toast((d && d.message) || "Settings saved", "ok");
-      if (d && d.warning) toast(d.warning, "warn", 12000);
+      toast(t("settings.saved"), "ok");
+      // The backend's warning is English; this view computes the same check
+      // (generationalWarningText) from the values just saved.
+      if (d && d.warning) toast(generationalWarningText() || d.warning, "warn", 12000);
       state.configDraft = {};   // edits are now persisted server-side
-      if (d && d.reload_page) { setTimeout(function () { location.reload(); }, 600); return; }
+      if (d && d.reload_page) { returnToSettings(); setTimeout(function () { location.reload(); }, 600); return; }
       loadConfig();
       scheduleRefresh(400);
     }).catch(function (e) {
-      toast((e && e.message) || "Couldn't save settings", "bad");
+      toast(errText(e, "settings.save_failed"), "bad");
     }).then(function () {
       setBusy(false);
-      if (btn) { btn.removeAttribute("disabled"); btn.querySelector("span").textContent = "Save settings"; }
+      if (btn) { btn.removeAttribute("disabled"); btn.querySelector("span").textContent = t("settings.save"); }
     });
   }
 
@@ -1325,16 +1463,16 @@
   function viewLogs(host) {
     var card = ce("div", { class: "card" });
     card.appendChild(ce("div", { class: "card-head" }, [
-      ce("h2", { text: "Add-on log" }), ce("div", { class: "spacer" }),
-      ce("button", { class: "btn ghost sm", onclick: loadLogs }, [iconNode("refresh"), ce("span", { text: "Refresh" })]),
+      ce("h2", { text: t("logs.title") }), ce("div", { class: "spacer" }),
+      ce("button", { class: "btn ghost sm", onclick: loadLogs }, [iconNode("refresh"), ce("span", { text: t("logs.refresh") })]),
       ce("button", { class: "btn subtle sm", onclick: function () {
         if (MOCK) { toast("Download (mock)", "info"); return; }
         var a = ce("a", { href: u("/log?format=download") }); document.body.appendChild(a); a.click(); a.remove();
-      } }, [iconNode("download"), ce("span", { text: "Download" })])
+      } }, [iconNode("download"), ce("span", { text: t("common.download") })])
     ]));
     var view = ce("pre", { class: "log-view", id: "log-view" });
-    if (logState.loading) view.appendChild(centerSpinner("Loading log…"));
-    else view.innerHTML = colorizeLog(logState.text || "No log output yet.");
+    if (logState.loading) view.appendChild(centerSpinner(t("logs.loading")));
+    else view.innerHTML = colorizeLog(logState.text || t("logs.empty"));
     card.appendChild(view);
     host.appendChild(card);
   }
@@ -1344,7 +1482,7 @@
     Promise.resolve(p).then(function (txt) {
       logState.text = txt; logState.loading = false;
       if (state.tab === "logs") { renderView(); var v = el("#log-view"); if (v) v.scrollTop = v.scrollHeight; }
-    }).catch(function () { logState.loading = false; logState.text = "Couldn't load the log."; if (state.tab === "logs") renderView(); });
+    }).catch(function () { logState.loading = false; logState.text = t("logs.load_failed"); if (state.tab === "logs") renderView(); });
   }
   function colorizeLog(txt) {
     return esc(txt).replace(/\b(ERROR|CRITICAL|WARNING|WARN|DEBUG|TRACE)\b/g, '<span class="lvl-$1">$1</span>');
@@ -1356,34 +1494,35 @@
   function viewAbout(host) {
     var s = state.status || {};
     host.appendChild(ce("div", { class: "card" }, [
-      ce("h2", { text: "About" }),
-      ce("p", { class: "dim", text: "Proton Drive Backup automatically creates Home Assistant backups and mirrors them to your end-to-end encrypted Proton Drive." }),
+      ce("h2", { text: t("tab.about") }),
+      ce("p", { class: "dim", text: t("about.intro") }),
       ce("div", { class: "grid cols-2 mt" }, [
-        statTile("Version", "v" + VERSION, null, "info"),
-        statTile("Proton Drive", s.proton_authenticated ? "Signed in" : "Signed out", s.proton_folder ? "Folder: " + s.proton_folder : null, "cloud")
+        statTile(t("about.version"), "v" + VERSION, null, "info"),
+        statTile("Proton Drive", s.proton_authenticated ? t("common.signed_in") : t("common.signed_out"), s.proton_folder ? t("common.folder", { folder: s.proton_folder }) : null, "cloud")
       ]),
       ce("div", { class: "btn-row mt" }, [
-        ce("button", { class: "btn ghost", onclick: openBugReport }, [iconNode("bug"), ce("span", { text: "Create a bug report" })]),
-        ce("button", { class: "btn subtle", onclick: function () { state.tab = "logs"; render(); loadLogs(); } }, [iconNode("doc"), ce("span", { text: "View logs" })])
+        ce("button", { class: "btn ghost", onclick: openBugReport }, [iconNode("bug"), ce("span", { text: t("about.bug_report") })]),
+        ce("button", { class: "btn subtle", onclick: function () { state.tab = "logs"; render(); loadLogs(); } }, [iconNode("doc"), ce("span", { text: t("about.view_logs") })])
       ])
     ]));
     if (!s.proton_authenticated) {
       host.appendChild(ce("div", { class: "card" }, [
-        ce("h2", { text: "Proton Drive sign-in" }),
-        s.proton_auth_warning ? ce("p", { class: "dim", text: "Last check: " + s.proton_auth_warning }) : null,
-        ce("p", { class: "dim", text: "Proton Drive uses an interactive sign-in (not OAuth). Click below to start; you'll open a Proton link and complete sign-in, including 2-factor, in your browser." }),
-        ce("p", { class: "dim", text: "This is a third-party application not officially supported by Proton." }),
-        ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: "Sign in to Proton" })])
+        ce("h2", { text: t("about.signin.title") }),
+        s.proton_auth_warning ? ce("p", { class: "dim", text: t("about.last_check", { warning: s.proton_auth_warning }) }) : null,
+        ce("p", { class: "dim", text: t("about.signin.help") }),
+        ce("p", { class: "dim", text: t("common.third_party") }),
+        ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: t("common.sign_in_to_proton") })])
       ]));
     } else {
       host.appendChild(ce("div", { class: "card" }, [
-        ce("h2", { text: "Proton Drive account" }),
-        ce("p", { class: "dim", text: s.proton_auth_warning
-          ? "Signed in, but the session couldn't be verified on the last check. If backups keep failing, sign in again."
-          : "Signed in. Signing out keeps your backups in Proton Drive but pauses uploads until you sign in again." }),
+        ce("h2", { text: t("about.account.title") }),
+        // Signed out with uploads on, the add-on makes no backups at all
+        // (renderAuthBanner); with uploads off, signing out changes nothing.
+        ce("p", { class: "dim", text: s.proton_auth_warning ? t("about.account.unverified")
+          : t(s.enable_proton_upload ? "about.account.signed_in" : "about.account.signed_in_upload_off") }),
         ce("div", { class: "btn-row" }, [
-          s.proton_auth_warning ? ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: "Sign in again" })]) : null,
-          ce("button", { class: "btn ghost", onclick: openProtonLogout }, [iconNode("x"), ce("span", { text: "Sign out" })])
+          s.proton_auth_warning ? ce("button", { class: "btn", onclick: openLogin }, [iconNode("link"), ce("span", { text: t("common.sign_in_again") })]) : null,
+          ce("button", { class: "btn ghost", onclick: openProtonLogout }, [iconNode("x"), ce("span", { text: t("common.sign_out") })])
         ])
       ]));
     }
@@ -1412,7 +1551,7 @@
   }
   function centerSpinner(label) {
     return ce("div", { class: "row", style: "justify-content:center;padding:30px;color:var(--text-dim)" }, [
-      ce("span", { class: "spinner-inline" }), ce("span", { text: label || "Loading…" })
+      ce("span", { class: "spinner-inline" }), ce("span", { text: label || t("common.loading") })
     ]);
   }
 
@@ -1454,7 +1593,7 @@
   }
   function modal(title, ic, bodyChildren, footChildren, wide) {
     return ce("div", { class: "modal" + (wide ? " wide" : ""), role: "dialog", "aria-modal": "true", "aria-label": title }, [
-      ce("div", { class: "modal-head" }, [iconNode(ic), ce("h3", { text: title }), ce("button", { class: "btn subtle icon x", "aria-label": "Close", html: icon("x"), onclick: closeModal })]),
+      ce("div", { class: "modal-head" }, [iconNode(ic), ce("h3", { text: title }), ce("button", { class: "btn subtle icon x", "aria-label": t("common.close"), html: icon("x"), onclick: closeModal })]),
       ce("div", { class: "modal-body" }, bodyChildren),
       footChildren ? ce("div", { class: "modal-foot" }, footChildren) : null
     ]);
@@ -1463,30 +1602,30 @@
   // ---- Create backup ----
   function openCreateBackup() {
     var s = state.status || {};
-    var nameInput = ce("input", { type: "text", placeholder: s.backup_name_template || "Custom name (optional)" });
-    var noteInput = ce("textarea", { placeholder: "Optional note (e.g. before upgrade)" });
+    var nameInput = ce("input", { type: "text", placeholder: s.backup_name_template || t("create.name_placeholder") });
+    var noteInput = ce("textarea", { placeholder: t("create.note_placeholder") });
     var retainHa = ce("input", { type: "checkbox" });
     var retainProton = ce("input", { type: "checkbox" });
     var body = [
-      ce("div", { class: "field" }, [ce("label", { text: "Name" }), ce("div", { class: "help", text: "Leave blank to use your naming template." }), nameInput]),
-      ce("div", { class: "field" }, [ce("label", { text: "Note" }), noteInput]),
+      ce("div", { class: "field" }, [ce("label", { text: t("common.name") }), ce("div", { class: "help", text: t("create.name_help") }), nameInput]),
+      ce("div", { class: "field" }, [ce("label", { text: t("common.note") }), noteInput]),
       ce("div", { class: "field" }, [
-        ce("label", { text: "Keep this backup (exempt from deletion)" }),
-        ce("div", { class: "checks" }, [
-          ce("label", {}, [retainHa, ce("div", {}, [ce("div", { class: "cx-name", text: "Keep in Home Assistant" })])]),
-          ce("label", {}, [retainProton, ce("div", {}, [ce("div", { class: "cx-name", text: "Keep in Proton Drive" })])])
+        ce("label", { id: "create-keep-label", text: t("create.keep") }),
+        ce("div", { class: "checks", role: "group", "aria-labelledby": "create-keep-label" }, [
+          ce("label", {}, [retainHa, ce("div", {}, [ce("div", { class: "cx-name", text: t("create.keep_in", { place: "Home Assistant" }) })])]),
+          ce("label", {}, [retainProton, ce("div", {}, [ce("div", { class: "cx-name", text: t("create.keep_in", { place: "Proton Drive" }) })])])
         ])
       ])
     ];
     var foot = [
-      ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal }),
+      ce("button", { class: "btn ghost", text: t("common.cancel"), onclick: closeModal }),
       ce("button", { class: "btn", onclick: function () {
         var query = qs({ custom_name: nameInput.value, note: noteInput.value, retain_ha: retainHa.checked, retain_proton: retainProton.checked });
         closeModal();
-        action(api("/backup" + (query ? "?" + query : ""), { method: "POST" }), "Backup requested");
-      } }, [iconNode("plus"), ce("span", { text: "Create backup" })])
+        action(api("/backup" + (query ? "?" + query : ""), { method: "POST" }), t("toast.backup_requested"));
+      } }, [iconNode("plus"), ce("span", { text: t("create.submit") })])
     ];
-    openModal(modal("Create a backup now", "plus", body, foot));
+    openModal(modal(t("create.title"), "plus", body, foot));
   }
 
   // ---- Delete ----
@@ -1505,22 +1644,22 @@
     });
     var warn = ce("div", { class: "banner warn", style: "margin:0 0 4px" }, [
       iconNode("warn", "b-ico"),
-      ce("div", { class: "b-body" }, [ce("div", { class: "b-msg", text: "Deleting a backup can't be undone." })])
+      ce("div", { class: "b-body" }, [ce("div", { class: "b-msg", text: t("delete.warning") })])
     ]);
-    var body = [warn, ce("div", { class: "field" }, [ce("label", { text: "Delete from:" }), ce("div", { class: "checks" }, rows)])];
+    var body = [warn, ce("div", { class: "field" }, [ce("label", { text: t("delete.from") }), ce("div", { class: "checks" }, rows)])];
     var delBtn = ce("button", { class: "btn danger", onclick: function () {
       var chosen = Object.keys(picks).filter(function (k) { return picks[k]; });
       if (!chosen.length) return;
       closeModal();
-      action(apiJson("/deleteSnapshot", { slug: b.slug, sources: chosen }), "Backup deleted");
-    } }, [iconNode("trash"), ce("span", { text: "Delete" })]);
+      action(apiJson("/deleteSnapshot", { slug: b.slug, sources: chosen }), t("toast.deleted"));
+    } }, [iconNode("trash"), ce("span", { text: t("common.delete") })]);
     function updateBtn() {
       var n = Object.keys(picks).filter(function (k) { return picks[k]; }).length;
-      delBtn.querySelector("span").textContent = n ? "Delete from " + n + " place" + (n > 1 ? "s" : "") : "Delete";
+      delBtn.querySelector("span").textContent = n ? t("delete.from_places", { n: n }) : t("common.delete");
       delBtn.toggleAttribute("disabled", n === 0);
     }
     updateBtn();
-    openModal(modal('Delete "' + b.name + '"', "trash", body, [ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal }), delBtn]));
+    openModal(modal(t("delete.title", { name: b.name }), "trash", body, [ce("button", { class: "btn ghost", text: t("common.cancel"), onclick: closeModal }), delBtn]));
   }
 
   // ---- Restore ----
@@ -1536,39 +1675,42 @@
     if (host.indexOf(":") !== -1 && host.charAt(0) !== "[") host = "[" + host + "]";
     var haBase = (s.ha_url_base || "").replace("{host}", host).replace(/\/+$/, "");
     var body = [
-      ce("p", { class: "dim", text: "Home Assistant restores backups from its own Settings screen. This backup is available in Home Assistant and ready to restore." }),
+      ce("p", { class: "dim", text: t("restore.intro") }),
       ce("div", { class: "banner info", style: "margin:0" }, [
         iconNode("info", "b-ico"),
         ce("div", { class: "b-body" }, [
-          ce("div", { class: "b-title", text: "How to restore" }),
-          ce("div", { class: "b-msg", html: "Open <b>Settings → System → Backups</b> in Home Assistant, choose <b>" + esc(b.name) + "</b>, and select Restore. You can also download the backup here and upload it manually." })
+          ce("div", { class: "b-title", text: t("restore.how_title") }),
+          // tHtml keeps the message's own <b> markup and escapes the name.
+          ce("div", { class: "b-msg", html: I18n.tHtml("restore.how_html", { name: b.name }) })
         ])
       ])
     ];
     var foot = [
-      ce("button", { class: "btn ghost", text: "Close", onclick: closeModal }),
-      ce("button", { class: "btn", onclick: function () { downloadBackup(b); } }, [iconNode("download"), ce("span", { text: "Download backup" })])
+      ce("button", { class: "btn ghost", text: t("common.close"), onclick: closeModal }),
+      ce("button", { class: "btn", onclick: function () { downloadBackup(b); } }, [iconNode("download"), ce("span", { text: t("restore.download") })])
     ];
-    if (haBase) foot.unshift(ce("a", { class: "btn subtle", href: haBase + "/config/backup/backups", target: "_blank", rel: "noopener", text: "Open HA backups" }));
-    openModal(modal("Restore backup", "restore", body, foot));
+    if (haBase) foot.unshift(ce("a", { class: "btn subtle", href: haBase + "/config/backup/backups", target: "_blank", rel: "noopener", text: t("restore.open_ha") }));
+    openModal(modal(t("restore.title"), "restore", body, foot));
   }
 
   // ---- Note ----
   function openNote(b) {
-    var ta = ce("textarea", { placeholder: "Write a note for this backup…" }); ta.value = b.note || "";
+    var ta = ce("textarea", { placeholder: t("note.placeholder") }); ta.value = b.note || "";
     var foot = [
-      ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal }),
-      ce("button", { class: "btn", text: "Save note", onclick: function () { closeModal(); action(apiJson("/note", { slug: b.slug, note: ta.value }), "Note saved"); } })
+      ce("button", { class: "btn ghost", text: t("common.cancel"), onclick: closeModal }),
+      ce("button", { class: "btn", text: t("note.save"), onclick: function () { closeModal(); action(apiJson("/note", { slug: b.slug, note: ta.value }), t("toast.note_saved")); } })
     ];
-    openModal(modal("Note", "note", [ce("div", { class: "field" }, [ta])], foot));
+    openModal(modal(t("common.note"), "note", [ce("div", { class: "field" }, [ta])], foot));
   }
 
   // ---- Details ----
   function openDetails(b) {
+    var date = I18n.dateTime(b.timestamp) || b.date;
+    var ago = I18n.relTime(b.timestamp) || b.createdAt;
     var rows = [
-      ["Name", b.name], ["Created", b.date + " (" + b.createdAt + ")"], ["Size", b.size],
-      ["Type", b.type], ["Home Assistant version", b.haVersion || "—"],
-      ["Encrypted", b.protected ? "Yes" : "No"], ["Slug", b.slug], ["Status", b.status || "—"]
+      [t("common.name"), b.name], [t("details.created"), t("details.created_value", { date: date, ago: ago })], [t("details.size"), b.size],
+      [t("details.type"), typeText(b.type)], [t("details.ha_version"), b.haVersion || "—"],
+      [t("details.encrypted"), b.protected ? t("common.yes") : t("common.no")], [t("details.slug"), b.slug], [t("details.status"), statusText(b.status) || "—"]
     ];
     var dl = ce("div", { class: "grid", style: "gap:10px" });
     rows.forEach(function (r) {
@@ -1581,38 +1723,42 @@
       var isHa = src.key === "HomeAssistant";
       locs.appendChild(ce("span", { class: "loc " + (isHa ? "ha" : "proton") }, [iconNode(isHa ? "home" : "cloud"), ce("span", { text: (isHa ? "Home Assistant" : "Proton Drive") + (src.size ? " · " + fmtBytes(src.size) : "") })]));
     });
-    var body = [dl, ce("div", { style: "margin-top:6px" }, [ce("div", { class: "muted", style: "font-size:.8rem;margin-bottom:6px", text: "Stored in" }), locs])];
-    if ((b.folders || []).length) body.push(ce("div", { class: "mt" }, [ce("div", { class: "muted", style: "font-size:.8rem", text: "Folders" }), ce("div", { text: b.folders.join(", ") })]));
-    if ((b.addons || []).length) body.push(ce("div", { class: "mt" }, [ce("div", { class: "muted", style: "font-size:.8rem", text: "Add-ons" }), ce("div", { text: b.addons.map(function (a) { return a.name; }).join(", ") })]));
-    openModal(modal("Backup details", "info", body, [ce("button", { class: "btn ghost", text: "Close", onclick: closeModal })], true));
+    var body = [dl, ce("div", { style: "margin-top:6px" }, [ce("div", { class: "muted", style: "font-size:.8rem;margin-bottom:6px", text: t("details.stored_in") }), locs])];
+    if ((b.folders || []).length) body.push(ce("div", { class: "mt" }, [ce("div", { class: "muted", style: "font-size:.8rem", text: t("details.folders") }), ce("div", { text: b.folders.join(", ") })]));
+    if ((b.addons || []).length) body.push(ce("div", { class: "mt" }, [ce("div", { class: "muted", style: "font-size:.8rem", text: t("details.addons") }), ce("div", { text: b.addons.map(function (a) { return a.name; }).join(", ") })]));
+    openModal(modal(t("details.title"), "info", body, [ce("button", { class: "btn ghost", text: t("common.close"), onclick: closeModal })], true));
   }
 
   // ---- Error details ----
   function openErrorDetails(e) {
+    var text = errText(e, "error.generic.message");
     var body = [
-      ce("p", { text: e.message || "" }),
+      ce("p", { text: text }),
+      // The backend's own wording too, when it was translated away: it's what
+      // the log and a bug report will show.
+      e.message && e.message !== text ? ce("p", { class: "muted", text: e.message }) : null,
       e.details ? ce("pre", { class: "log-view", text: e.details }) : null
     ];
     var foot = [
-      ce("button", { class: "btn ghost", text: "Close", onclick: closeModal }),
-      ce("button", { class: "btn", onclick: function () { closeModal(); openBugReport(); } }, [iconNode("bug"), ce("span", { text: "Report a bug" })])
+      ce("button", { class: "btn ghost", text: t("common.close"), onclick: closeModal }),
+      ce("button", { class: "btn", onclick: function () { closeModal(); openBugReport(); } }, [iconNode("bug"), ce("span", { text: t("common.report_bug") })])
     ];
-    openModal(modal("Error details", "alert", body, foot, true));
+    openModal(modal(t("error.details_title"), "alert", body, foot, true));
   }
 
   // ---- Bug report ----
   function openBugReport() {
-    var pre = ce("pre", { class: "log-view", text: "Gathering report…" });
+    var pre = ce("pre", { class: "log-view", text: t("bug.gathering") });
     var copyBtn = ce("button", { class: "btn", onclick: function () {
-      navigator.clipboard ? navigator.clipboard.writeText(pre.textContent).then(function () { toast("Copied to clipboard", "ok"); }, function () { toast("Couldn't copy", "bad"); })
-        : toast("Clipboard unavailable", "bad");
-    } }, [iconNode("copy"), ce("span", { text: "Copy report" })]);
-    openModal(modal("Bug report", "bug", [
-      ce("p", { class: "dim", text: "Copy the report below into a new GitHub issue. It includes diagnostics but no Proton credentials." }),
+      navigator.clipboard ? navigator.clipboard.writeText(pre.textContent).then(function () { toast(t("toast.copied"), "ok"); }, function () { toast(t("toast.copy_failed"), "bad"); })
+        : toast(t("toast.clipboard_unavailable"), "bad");
+    } }, [iconNode("copy"), ce("span", { text: t("bug.copy") })]);
+    openModal(modal(t("bug.title"), "bug", [
+      ce("p", { class: "dim", text: t("bug.help") }),
       pre
-    ], [ce("button", { class: "btn ghost", text: "Close", onclick: closeModal }), copyBtn], true));
-    api("/makeanissue").then(function (d) { pre.textContent = (d && d.markdown) || "No report available."; })
-      .catch(function (e) { pre.textContent = (e && e.message) || "Couldn't build the report."; });
+    ], [ce("button", { class: "btn ghost", text: t("common.close"), onclick: closeModal }), copyBtn], true));
+    api("/makeanissue").then(function (d) { pre.textContent = (d && d.markdown) || t("bug.none"); })
+      .catch(function (e) { pre.textContent = errText(e, "bug.failed"); });
   }
 
   // ---- Proton login ----
@@ -1621,7 +1767,7 @@
     state.pendingLogin = false;
     var body = ce("div", { id: "login-modal" });
     var foot = ce("div", { class: "row", style: "width:100%;justify-content:flex-end" });
-    var node = modal("Sign in to Proton Drive", "cloud", [body], null);
+    var node = modal(t("login.title"), "cloud", [body], null);
     // Closing the dialog any way (Escape, backdrop, X, Cancel) must abandon an
     // in-progress login so we don't leave a dangling CLI session + 2s polling.
     openModal(node, { onClose: cancelPendingLogin });
@@ -1630,40 +1776,46 @@
   }
   function renderLoginStart(body, foot, node) {
     body.innerHTML = "";
-    body.appendChild(ce("p", { class: "dim", text: "Proton uses an interactive sign-in. Start the flow, open the link in your browser, and complete sign-in (including 2-factor). This page updates automatically." }));
-    body.appendChild(ce("p", { class: "dim", text: "This is a third-party application not officially supported by Proton." }));
+    body.appendChild(ce("p", { class: "dim", text: t("login.intro") }));
+    body.appendChild(ce("p", { class: "dim", text: t("common.third_party") }));
+    function failed(msg) {
+      toast(msg, "bad");
+      startBtn.removeAttribute("disabled"); startBtn.querySelector("span").textContent = t("login.start");
+    }
     var startBtn = ce("button", { class: "btn", onclick: function () {
-      startBtn.setAttribute("disabled", ""); startBtn.querySelector("span").textContent = "Starting…";
+      startBtn.setAttribute("disabled", ""); startBtn.querySelector("span").textContent = t("login.starting");
       api("/protonlogin", { method: "POST" }).then(function (d) {
-        if (d && d.ok && d.url) { state.pendingLogin = true; renderLoginPending(body, d.url, d.message); scheduleRefresh(400); }
-        else { toast((d && d.message) || "Couldn't start sign-in", "bad"); startBtn.removeAttribute("disabled"); startBtn.querySelector("span").textContent = "Start sign-in"; }
-      }).catch(function (e) { toast((e && e.message) || "Couldn't start sign-in", "bad"); startBtn.removeAttribute("disabled"); startBtn.querySelector("span").textContent = "Start sign-in"; });
-    } }, [iconNode("link"), ce("span", { text: "Start sign-in" })]);
+        if (d && d.ok && d.url) { state.pendingLogin = true; renderLoginPending(body, d.url); scheduleRefresh(400); }
+        // Not error.proton_cant_connect.message: it ends "the add-on will keep
+        // retrying automatically", and nothing retries a sign-in.
+        else failed(d && d.error_type === "proton_cant_connect" ? t("login.unreachable") : errText(d, "login.start_failed"));
+      }).catch(function (e) { failed(errText(e, "login.start_failed")); });
+    } }, [iconNode("link"), ce("span", { text: t("login.start") })]);
     body.appendChild(ce("div", { class: "btn-row" }, [startBtn]));
   }
-  function renderLoginPending(body, url, message) {
+  function renderLoginPending(body, url) {
     body.innerHTML = "";
-    body.appendChild(ce("p", { text: message || "Open this link, sign in to Proton (including 2-factor), then keep this page open." }));
+    body.appendChild(ce("p", { text: t("login.pending") }));
     // SECURITY: the URL carries a secret #payload fragment. Only ever place it
     // in href/textContent, never innerHTML, never log it. rel=noopener.
     var link = ce("a", { href: url, target: "_blank", rel: "noopener noreferrer" });
     link.textContent = url;
-    var copyBtn = ce("button", { class: "btn subtle icon", "aria-label": "Copy link", html: icon("copy"), onclick: function () {
-      navigator.clipboard ? navigator.clipboard.writeText(url).then(function () { toast("Link copied", "ok"); }) : toast("Clipboard unavailable", "bad");
+    var copyBtn = ce("button", { class: "btn subtle icon", "aria-label": t("login.copy_link"), html: icon("copy"), onclick: function () {
+      navigator.clipboard ? navigator.clipboard.writeText(url).then(function () { toast(t("toast.link_copied"), "ok"); }) : toast(t("toast.clipboard_unavailable"), "bad");
     } });
     body.appendChild(ce("div", { class: "login-link" }, [iconNode("link"), link, copyBtn]));
     body.appendChild(ce("div", { class: "btn-row mt", style: "align-items:center" }, [
-      ce("a", { class: "btn", href: url, target: "_blank", rel: "noopener noreferrer", text: "Open Proton sign-in" }),
-      ce("span", { class: "row", style: "color:var(--text-dim);font-size:.85rem;gap:8px" }, [ce("span", { class: "spinner-inline" }), ce("span", { text: "Waiting for you to finish…" })])
+      ce("a", { class: "btn", href: url, target: "_blank", rel: "noopener noreferrer", text: t("login.open") }),
+      ce("span", { class: "row", style: "color:var(--text-dim);font-size:.85rem;gap:8px" }, [ce("span", { class: "spinner-inline" }), ce("span", { text: t("login.waiting") })])
     ]));
     body.appendChild(ce("div", { class: "btn-row mt" }, [
-      ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal })
+      ce("button", { class: "btn ghost", text: t("common.cancel"), onclick: closeModal })
     ]));
   }
   function updateLoginModal(url) {
     var body = el("#login-modal"); if (!body) return;
     var existing = body.querySelector(".login-link a");
-    if (!existing || existing.textContent !== url) renderLoginPending(body, url, null);
+    if (!existing || existing.textContent !== url) renderLoginPending(body, url);
   }
   // Invoked from the login modal's onClose. Only tells the backend to cancel
   // when a login was actually pending — the success path clears the flag first,
@@ -1676,17 +1828,19 @@
 
   function openProtonLogout() {
     var foot = [
-      ce("button", { class: "btn ghost", text: "Cancel", onclick: closeModal }),
+      ce("button", { class: "btn ghost", text: t("common.cancel"), onclick: closeModal }),
       ce("button", { class: "btn danger", onclick: function () {
         closeModal();
         action(api("/protonlogout", { method: "POST" }), false).then(function (d) {
-          if (d && d.ok) toast(d.message || "Signed out of Proton Drive", "ok");
-          else toast((d && d.message) || "Couldn't sign out", "bad");
+          if (d && d.ok) toast(t("toast.signed_out"), "ok");
+          else toast(d && d.error_type === "proton_cant_connect" ? t("logout.unreachable")
+            : errText(d, "toast.sign_out_failed"), "bad");
         }).catch(function () {});
-      } }, [iconNode("x"), ce("span", { text: "Sign out" })])
+      } }, [iconNode("x"), ce("span", { text: t("common.sign_out") })])
     ];
-    openModal(modal("Sign out of Proton Drive?", "cloud", [
-      ce("p", { text: "Your backups stay in Proton Drive, but uploads pause until you sign in again." })
+    var uploadOn = !state.status || state.status.enable_proton_upload;
+    openModal(modal(t("logout.title"), "cloud", [
+      ce("p", { text: t(uploadOn ? "logout.message" : "logout.message_upload_off") })
     ], foot));
   }
 
@@ -1713,5 +1867,63 @@
   // ------------------------------------------------------------------------
   ensureToastHost();   // live region must exist before the first toast
   renderMockBar();
-  refresh();
+  // Strings first: everything rendered from here on goes through t().
+  function boot() {
+    I18n.load(function (code) { return u("/static/" + VERSION + "/app/locales/" + code + ".json"); }).then(function () {
+      var boot = el(".boot p"); if (boot) boot.textContent = t("boot.loading");
+      if (returningToSettings()) { state.tab = "settings"; loadConfig(); }
+      refresh();
+    }, function () {
+      // Not even English loaded, so there's nothing to translate with. Keep
+      // trying, as refresh() does while the add-on isn't answering.
+      if (!el("#boot-failed")) renderBootFailed();
+      setTimeout(boot, 8000);
+    });
+  }
+
+  function renderBootFailed() {
+    var app = el("#app");
+    app.removeAttribute("aria-busy");
+    app.innerHTML = "";
+    app.appendChild(ce("div", { class: "shell", id: "boot-failed" }, [
+      ce("div", { class: "banner bad", style: "margin-top:40px" }, [
+        iconNode("alert", "b-ico"),
+        ce("div", { class: "b-body" }, [
+          ce("div", { class: "b-title", text: "Couldn't load the add-on's interface" }),
+          ce("div", { class: "b-msg", text: "Some of its files didn't load. Trying again every few seconds." }),
+          ce("div", { class: "b-actions" }, [ce("button", { class: "btn", text: "Reload", onclick: function () { location.reload(); } })])
+        ])
+      ])
+    ]));
+  }
+
+  // i18n.js didn't load or didn't run: load it again in place every 8 s, as
+  // boot() does for the catalogs. Reloading the page instead could land on
+  // Home Assistant's bare "502: Bad Gateway" page while the add-on restarts,
+  // and nothing on that page tries again.
+  //
+  // The address is the one index.jinja2 wrote into the page's own <script>
+  // tag. Don't build it from VERSION: that comes out of the bootstrap JSON,
+  // and page text must not end up in a script URL (CodeQL js/xss-through-dom).
+  function retryI18n(attempt) {
+    var first = document.querySelector('script[src$="/app/i18n.js"]');
+    if (!first) return;  // index.jinja2 always has it; test_translations.py checks
+    setTimeout(function () {
+      var script = document.createElement("script");
+      script.src = first.getAttribute("src") + "?retry=" + attempt;
+      script.onload = function () {
+        if (window.I18n) { I18n = window.I18n; t = I18n.t; boot(); return; }
+        script.remove(); retryI18n(attempt + 1);  // it loaded but didn't run
+      };
+      script.onerror = function () { script.remove(); retryI18n(attempt + 1); };
+      document.head.appendChild(script);
+    }, 8000);
+  }
+
+  if (I18n) {
+    boot();
+  } else {
+    renderBootFailed();
+    retryI18n(1);
+  }
 })();
