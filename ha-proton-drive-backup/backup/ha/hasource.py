@@ -1,15 +1,18 @@
 import asyncio
+import math
 import aiohttp
 from datetime import timedelta
 from io import IOBase
 from threading import Lock, Thread
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Tuple, Union
 
 from aiohttp.client_exceptions import ClientResponseError
 from injector import inject, singleton
 
-from backup.util import AsyncHttpGetter, GlobalInfo, Estimator, DataCache, KEY_NOTE, KEY_LAST_SEEN, KEY_PENDING, KEY_NAME, KEY_CREATED, KEY_I_MADE_THIS, KEY_IGNORE
+from backup.util import AsyncHttpGetter, GlobalInfo, Estimator, DataCache, KEY_NOTE, KEY_LAST_SEEN, KEY_PENDING, KEY_NAME, KEY_CREATED, KEY_I_MADE_THIS, KEY_IGNORE, UpgradeFlags
 from ..config import Config, Setting, CreateOptions, Startable, Version
+from ..config.durationparser import formatNumber
+from . import oldwebui
 from ..const import SOURCE_HA
 from ..model import BackupSource, AbstractBackup, HABackup, Backup
 from ..exceptions import (LogicError, BackupInProgress, UnknownNetworkStorageError, InactiveNetworkStorageError,
@@ -23,6 +26,93 @@ from backup.const import FOLDERS, NECESSARY_OLD_BACKUP_PLURAL_NAME
 from .addon_stopper import LOGGER, AddonStopper
 
 logger: StandardLogger = getLogger(__name__)
+
+
+def deleteIgnoredTypedAsSeconds(options: Dict[str, Any]) -> Optional[Tuple[float, bool]]:
+    """
+    Up to v0.3.0 the web UI read a plain number typed into "Delete ignored
+    backups after" as seconds, so "30" was saved as 30 seconds (30 / 86400
+    days) and every ignored backup (by default, all those the add-on didn't
+    make) was deleted about 30 seconds after it appeared.  This replays that
+    release's web UI (oldwebui) to see whether typing a number there saved
+    exactly the stored value.  Returns None if not, otherwise (typed, sure):
+    typed is the number that was typed, i.e. the value in seconds.  If sure,
+    correct it to that many days.  If not, something the user may have meant
+    saved exactly the same value (e.g. "2 hours" and "7200"), so ask them to
+    check it.
+    """
+    value = options.get(Setting.DELETE_IGNORED_AFTER_DAYS.key())
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value < math.inf:
+        return None
+    typed = round(value * oldwebui.DAY_SECONDS, 3)
+    if not math.isfinite(typed):
+        return None  # e.g. 1e304 days, from the Configuration tab
+    # A whole number of quarter days (6 hours, 1 day, 30 days): what typing
+    # 21600, 86400 or 2592000 saved too, but nobody typed those meaning days.
+    if value * 4 == int(value * 4):
+        return None
+    # Beyond an hour, a number of days typed in the web UI is whole: no one
+    # meant 106665.984 days.  (0.12345 days set in the Configuration tab is
+    # 10666.08 seconds.)
+    if value >= 1 / 24 and typed != int(typed):
+        return None
+    try:
+        if oldwebui.save(formatNumber(typed)) != value:
+            return None
+    except (ValueError, OverflowError):
+        return None
+    if value < 1 / 24:
+        # Under an hour, corrected even if it may have been meant (e.g. "30
+        # minutes"): deleting every ignored backup within the hour is hardly
+        # ever wanted, and a correction only keeps backups longer.
+        return typed, True
+    return typed, not _deleteIgnoredCouldBeMeant(value)
+
+
+def _deleteIgnoredCouldBeMeant(value: float) -> bool:
+    """Whether something a user may have meant made v0.3.0 save exactly value."""
+    # Set in the Configuration tab with up to 4 decimals, e.g. 0.33 or 30 days.
+    if round(value, 4) == value:
+        return True
+    try:
+        # A duration typed in whole minutes, e.g. "2 hours" or "90 minutes".
+        if oldwebui.save("{0} minutes".format(round(value * 24 * 60))) == value:
+            return True
+        # Set in the Configuration tab with up to 3 decimals, then saved again
+        # by v0.3.0's web UI with any other change: it saved what it showed,
+        # whole seconds, so 0.999 became "23 hours, 58 minutes, 33 seconds".
+        # Under a day, 4 decimals too: hours as a fraction of a day, e.g.
+        # 0.0833 (2 hours) became 7197 seconds.  Not beyond a day, where 1 in 9
+        # typed numbers (99999 among them) is also some 4-decimal value re-saved.
+        for scale in (1000, 10000) if value < 1 else (1000,):
+            nearest = math.ceil(value * scale)
+            for candidate in (nearest - 1, nearest, nearest + 1):
+                if candidate > 0 and oldwebui.save(oldwebui.show(candidate / scale)) == value:
+                    return True
+    except (ValueError, OverflowError):
+        pass
+    return False
+
+
+# The last release whose web UI read a plain number as seconds.
+LAST_SECONDS_BUG_VERSION = Version.parse("0.3.0")
+
+# Sent only when deleteIgnoredTypedAsSeconds finds the bug.
+DELETE_IGNORED_FIXED_NOTIFICATION_ID = "proton_delete_ignored_fixed"
+DELETE_IGNORED_FIXED_TITLE = "Proton Drive Backup corrected a setting"
+DELETE_IGNORED_FIXED_MESSAGE = (
+    "\"Delete ignored backups after\" was {typed} seconds: what an earlier version of the add-on saved when {typed} "
+    "was typed in its web UI, since it read a plain number as seconds.  Ignored backups (by default, every backup the "
+    "add-on didn't make) were being deleted that soon after they appeared.  It's now {typed} days.  If you meant a "
+    "shorter time, set it again.")
+DELETE_IGNORED_NOTICE_TRIES = 5
+DELETE_IGNORED_CHECK_TITLE = "Proton Drive Backup: check a setting"
+DELETE_IGNORED_CHECK_MESSAGE = (
+    "Up to v0.3.0, the add-on's web UI read a plain number in \"Delete ignored backups after\" as seconds; it now "
+    "means days.  Yours is {shown}, which is also what typing {typed} there saved.  If you typed {typed} meaning "
+    "days, set it again: ignored backups (by default, every backup the add-on didn't make) are being deleted after "
+    "{shown}.  Otherwise there's nothing to do.")
+
 
 class PendingBackup(AbstractBackup):
     def __init__(self, backupType, protected, options: CreateOptions, request_info, config, time):
@@ -162,6 +252,17 @@ class HaSource(BackupSource[HABackup], Startable):
         self.pending_backup: Optional[PendingBackup] = None
         self._pending_backup_task = None
         self._initialized = False
+        # One refresh at a time: getconfig, init and create each start one.
+        # Otherwise a refresh that read the options before another one
+        # corrected "Delete ignored backups after" applied the old value again,
+        # or corrected it twice.
+        self._refresh_lock = asyncio.Lock()
+        # _fixDeleteIgnoredSeconds has run since the add-on started.
+        self._delete_ignored_checked = False
+        # Its notification, (title, message), until sent: retried on each
+        # refresh, DELETE_IGNORED_NOTICE_TRIES times in all.
+        self._delete_ignored_notice: Optional[Tuple[str, str]] = None
+        self._delete_ignored_notice_tries = 0
 
     def isInitialized(self):
         return self._initialized
@@ -416,45 +517,138 @@ class HaSource(BackupSource[HABackup], Startable):
         await self._refreshInfo()
 
     async def _refreshInfo(self) -> None:
+        async with self._refresh_lock:
+            try:
+                self.self_info = await self.harequests.selfInfo()
+                self.host_info = await self.harequests.info()
+                self.ha_info = await self.harequests.haInfo()
+                self.super_info = await self.harequests.supervisorInfo()
+                self.mount_info = await self.harequests.mountInfo()
+
+                addon_info = ensureKey("addons", await self.harequests.getAddons(), "Supervisor Metadata")
+                self.config.update(await self._fixDeleteIgnoredSeconds(
+                    ensureKey("options", self.self_info, "addon metdata")))
+                if self.config.mustSaveUpgradeChanges():
+                    LOGGER.info("The configuration format has changed in this version of the addon and your configuration will be automatically updated")
+                    options = {}
+                    for option in self.config.getAllConfig().keys():
+                        options[option.value] = self.config.get(option)
+                    await self.harequests.updateConfig(options)
+                    self.config.persistedChanges()
+
+                self._info.ha_port = ensureKey(
+                    "port", self.ha_info, "Home Assistant metadata")
+                self._info.ha_ssl = ensureKey(
+                    "ssl", self.ha_info, "Home Assistant metadata")
+                self._info.addons = addon_info
+                self._info.slug = ensureKey(
+                    "slug", self.self_info, "addon metdata")
+                self._info.url = self.getAddonUrl()
+
+                self._addons = {}
+                for addon in addon_info:
+                    self._addons[addon.get('slug', "default")] = addon
+
+                self._info.addDebugInfo("self_info", self.self_info)
+                self._info.addDebugInfo("host_info", self.host_info)
+                self._info.addDebugInfo("ha_info", self.ha_info)
+                self._info.addDebugInfo("super_info", self.super_info)
+            except Exception as e:
+                logger.debug("Failed to connect to supervisor")
+                logger.debug(logger.formatException(e))
+                raise e
+
+    def _mustCheckDeleteIgnored(self) -> bool:
+        if self._delete_ignored_checked:
+            return False
+        cache = self._data_cache
+        # This start upgraded from a version with the bug, e.g. after going back
+        # to v0.3.0 and up again: a value saved meanwhile may have it.
+        if Version.default() < cache.previousVersion <= LAST_SECONDS_BUG_VERSION \
+                and cache.previousVersion < cache.currentVersion:
+            return True
+        # Otherwise once per install, and only one that ran a version with the
+        # bug: since the fix, a value can be chosen on purpose.
+        return not cache.checkFlag(UpgradeFlags.FIXED_DELETE_IGNORED_SECONDS) \
+            and cache.firstVersion <= LAST_SECONDS_BUG_VERSION
+
+    @staticmethod
+    def _deleteIgnoredShown(options: Dict[str, Any]) -> str:
+        """The value as the settings form shows it, e.g. "30 days" or "2 hours"."""
+        return Setting.DELETE_IGNORED_AFTER_DAYS.validator().formatForUi(
+            options[Setting.DELETE_IGNORED_AFTER_DAYS.key()])
+
+    async def _fixDeleteIgnoredSeconds(self, options: Dict[str, Any]) -> Dict[str, Any]:
+        """See deleteIgnoredTypedAsSeconds."""
+        if self._delete_ignored_notice is not None:
+            # A notification from an earlier refresh still has to be sent.
+            if await self._sendDeleteIgnoredNotice():
+                self._deleteIgnoredChecked()
+            return options
+        if not self._mustCheckDeleteIgnored():
+            return options
+        found = deleteIgnoredTypedAsSeconds(options)
+        sure = False
+        if found is not None:
+            typed, sure = found
+            if sure:
+                options = dict(options)
+                options[Setting.DELETE_IGNORED_AFTER_DAYS.key()] = typed
+                try:
+                    await self.harequests.updateConfig(options)
+                except Exception as e:
+                    # Run with the corrected value anyway, and save it on the
+                    # next refresh: failing here would stop every sync.
+                    logger.warning("Couldn't save the corrected 'Delete ignored backups after' ({0} days); will try "
+                                   "again.  {1}".format(formatNumber(typed), logger.formatException(e)))
+                    return options
+                logger.warning("'Delete ignored backups after' was saved as {0} seconds, because an earlier "
+                               "version's web UI read a plain number as seconds.  Changed it to {0} days."
+                               .format(formatNumber(typed)))
+                title, message = DELETE_IGNORED_FIXED_TITLE, DELETE_IGNORED_FIXED_MESSAGE
+            else:
+                logger.warning("'Delete ignored backups after' is {0}, which is also what typing {1} in an earlier "
+                               "version's web UI saved, reading it as seconds.  If {1} was meant as days, set it "
+                               "again.".format(self._deleteIgnoredShown(options), formatNumber(typed)))
+                title, message = DELETE_IGNORED_CHECK_TITLE, DELETE_IGNORED_CHECK_MESSAGE
+            # Tell the user only if it was deleting backups: with both ignore
+            # options off the setting has no effect.  (self.config still holds
+            # the options from startup or the last refresh: the same ignore
+            # settings, since only this one value is being corrected.)
+            if self.config.get(Setting.IGNORE_OTHER_BACKUPS) or self.config.get(Setting.IGNORE_UPGRADE_BACKUPS):
+                self._delete_ignored_notice = (title, message.format(
+                    typed=formatNumber(typed), shown=self._deleteIgnoredShown(options)))
+                self._delete_ignored_notice_tries = 0
+        # A corrected value is done with, whether or not the notification got
+        # through (it's sent again on later refreshes).  A value only asked
+        # about isn't until the user has been told: nothing else tells them,
+        # so after a restart the check runs again.
+        if await self._sendDeleteIgnoredNotice() or sure:
+            self._deleteIgnoredChecked()
+        return options
+
+    async def _sendDeleteIgnoredNotice(self) -> bool:
+        """True once there's nothing left to send: sent, or given up on."""
+        if self._delete_ignored_notice is None:
+            return True
+        title, message = self._delete_ignored_notice
         try:
-            self.self_info = await self.harequests.selfInfo()
-            self.host_info = await self.harequests.info()
-            self.ha_info = await self.harequests.haInfo()
-            self.super_info = await self.harequests.supervisorInfo()
-            self.mount_info = await self.harequests.mountInfo()
-
-            addon_info = ensureKey("addons", await self.harequests.getAddons(), "Supervisor Metadata")
-            self.config.update(
-                ensureKey("options", self.self_info, "addon metdata"))
-            if self.config.mustSaveUpgradeChanges():
-                LOGGER.info("The configuration format has changed in this version of the addon and your configuration will be automatically updated")
-                options = {}
-                for option in self.config.getAllConfig().keys():
-                    options[option.value] = self.config.get(option)
-                await self.harequests.updateConfig(options)
-                self.config.persistedChanges()
-
-            self._info.ha_port = ensureKey(
-                "port", self.ha_info, "Home Assistant metadata")
-            self._info.ha_ssl = ensureKey(
-                "ssl", self.ha_info, "Home Assistant metadata")
-            self._info.addons = addon_info
-            self._info.slug = ensureKey(
-                "slug", self.self_info, "addon metdata")
-            self._info.url = self.getAddonUrl()
-
-            self._addons = {}
-            for addon in addon_info:
-                self._addons[addon.get('slug', "default")] = addon
-
-            self._info.addDebugInfo("self_info", self.self_info)
-            self._info.addDebugInfo("host_info", self.host_info)
-            self._info.addDebugInfo("ha_info", self.ha_info)
-            self._info.addDebugInfo("super_info", self.super_info)
+            await self.harequests.sendNotification(title, message, DELETE_IGNORED_FIXED_NOTIFICATION_ID)
         except Exception as e:
-            logger.debug("Failed to connect to supervisor")
-            logger.debug(logger.formatException(e))
-            raise e
+            self._delete_ignored_notice_tries += 1
+            if self._delete_ignored_notice_tries < DELETE_IGNORED_NOTICE_TRIES:
+                logger.warning("Couldn't send the notification about 'Delete ignored backups after'; will try "
+                               "again.  {0}".format(logger.formatException(e)))
+                return False
+            logger.warning("Couldn't send the notification about 'Delete ignored backups after' in {0} tries; "
+                           "giving up.  It said: {1}".format(DELETE_IGNORED_NOTICE_TRIES, message))
+        self._delete_ignored_notice = None
+        return True
+
+    def _deleteIgnoredChecked(self):
+        self._delete_ignored_checked = True
+        self._data_cache.addFlag(UpgradeFlags.FIXED_DELETE_IGNORED_SECONDS)
+        self._data_cache.saveIfDirty()
 
     def addonHasLogo(self, slug):
         return self._addons.get(slug, {}).get('logo', False)

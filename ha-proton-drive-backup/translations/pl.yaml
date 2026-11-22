@@ -1,0 +1,161 @@
+# Nazwy i opisy dla karty Konfiguracja dodatku w Home Assistancie. Zobacz
+# en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Ile kopii zachować w Home Assistancie
+    description: Ile najnowszych kopii trzymać na tym urządzeniu; najstarsza jest usuwana pierwsza. Przy 0 nic nie jest usuwane z Home Assistanta (żeby nie trzymać lokalnych kopii, włącz zamiast tego „Usuń z Home Assistanta po przesłaniu”).
+  max_backups_in_proton_drive:
+    name: Ile kopii zachować w Proton Drive
+    description: Ile najnowszych kopii trzymać w Proton Drive; najstarsza jest usuwana pierwsza. Przy 0 nic nie jest usuwane z Proton Drive.
+  days_between_backups:
+    name: Dni między kopiami
+    description: Jak często tworzona jest nowa kopia, w dniach (można podać ułamek). Gdy ustawiona jest pora dnia, wartość jest zaokrąglana w górę do pełnych dni. 0 wyłącza zaplanowane kopie.
+  ignore_other_backups:
+    name: Ignoruj kopie utworzone gdzie indziej
+    description: Nie zarządzaj kopiami, których nie utworzył ten dodatek, i ich nie usuwaj.
+  ignore_upgrade_backups:
+    name: Ignoruj kopie robione przy aktualizacjach
+    description: Nie licz kopii, które Home Assistant robi automatycznie przy aktualizacjach.
+  backup_storage:
+    name: Lokalizacja kopii
+    description: Nazwa pamięci sieciowej Home Assistanta, w której mają powstawać kopie, albo local-disk. Puste oznacza domyślną lokalizację Home Assistanta.
+  delete_after_upload:
+    name: Usuń z Home Assistanta po przesłaniu
+    description: Po przesłaniu trzymaj kopie tylko w Proton Drive.
+  delete_before_new_backup:
+    name: Usuń starą kopię przed utworzeniem nowej
+    description: 'Przydatne, gdy brakuje miejsca na dysku: najpierw usuwana jest najstarsza kopia.'
+  use_ssl:
+    name: Używaj SSL
+    description: Udostępniaj dodatkowy serwer WWW przez HTTPS, z opcjami „Plik certyfikatu” i „Plik klucza”.
+  certfile:
+    name: Plik certyfikatu
+    description: 'Certyfikat dla „Używaj SSL”. Domyślnie: /ssl/fullchain.pem.'
+  keyfile:
+    name: Plik klucza
+    description: 'Klucz prywatny dla „Używaj SSL”. Domyślnie: /ssl/privkey.pem.'
+  require_login:
+    name: Wymagaj logowania do Home Assistanta
+    description: Na dodatkowym serwerze WWW pytaj o nazwę użytkownika i hasło administratora Home Assistanta. Zostaw włączone zawsze, gdy dodatkowy serwer jest udostępniony.
+  backup_name:
+    name: Szablon nazw
+    description: Szablon nazw kopii, np. {type} Backup {year}-{month}-{day}. Ustawienia interfejsu WWW pokazują wszystkie zmienne.
+  backup_time_of_day:
+    name: Pora dnia
+    description: Czas lokalny tworzenia zaplanowanych kopii, jako HH:MM (24 godziny). Puste oznacza dowolną porę.
+  warn_for_low_space:
+    name: Ostrzegaj, gdy brakuje miejsca
+    description: Sprawdzaj wolne miejsce na dysku przed utworzeniem kopii i zatrzymaj się z ostrzeżeniem, gdy jest go mało.
+  watch_backup_directory:
+    name: Obserwuj katalog kopii
+    description: Zauważaj nowe lub usunięte pliki kopii od razu, a nie dopiero przy następnej synchronizacji.
+  generational_days:
+    name: Ile kopii dziennych zachować
+    description: 'Kopie generacyjne: ile kopii dziennych zachować. Gdy ustawiona jest jakakolwiek opcja generacyjna, 0 liczy się jak 1, więc najnowsza kopia jest zawsze zachowywana.'
+  generational_weeks:
+    name: Ile kopii tygodniowych zachować
+    description: 'Kopie generacyjne: ile kopii tygodniowych zachować.'
+  generational_months:
+    name: Ile kopii miesięcznych zachować
+    description: 'Kopie generacyjne: ile kopii miesięcznych zachować.'
+  generational_years:
+    name: Ile kopii rocznych zachować
+    description: 'Kopie generacyjne: ile kopii rocznych zachować.'
+  generational_day_of_year:
+    name: Dzień kopii rocznej
+    description: Dzień roku (1–365), z którego kopia jest zachowywana jako roczna.
+  generational_day_of_month:
+    name: Dzień kopii miesięcznej
+    description: Dzień miesiąca (1–31), z którego kopia jest zachowywana jako miesięczna.
+  generational_day_of_week:
+    name: Dzień kopii tygodniowej
+    description: Dzień tygodnia, z którego kopia jest zachowywana jako tygodniowa.
+  generational_delete_early:
+    name: Usuwaj dodatkowe kopie wcześniej
+    description: Usuwaj nadmiarowe kopie, zanim zostanie osiągnięty limit.
+  notify_for_stale_backups:
+    name: Powiadamiaj, gdy kopie są nieaktualne
+    description: Wyślij trwałe powiadomienie, jeśli kopie przestaną być tworzone, także gdy są wstrzymane, bo dodatek jest wylogowany z Proton.
+  enable_backup_stale_sensor:
+    name: Sensor nieaktualnych kopii
+    description: Utwórz binary_sensor.backups_stale, który włącza się, gdy kopie są nieaktualne.
+  enable_backup_state_sensor:
+    name: Sensor stanu kopii
+    description: Utwórz sensor.backup_state, który podaje stan Twoich kopii.
+  backup_password:
+    name: Hasło kopii
+    description: 'Szyfruj kopie tym hasłem. Puste oznacza brak hasła. Przechowuj je w bezpiecznym miejscu: jest potrzebne do przywracania.'
+  exclude_folders:
+    name: Wyklucz foldery
+    description: Foldery, oddzielone przecinkami, pomijane w kopiach, np. share,media. Po ustawieniu kopie stają się częściowe.
+  exclude_addons:
+    name: Wyklucz dodatki
+    description: Slugi dodatków, oddzielone przecinkami, pomijanych w kopiach, np. core_mariadb. Po ustawieniu kopie stają się częściowe.
+  exclude_ha_database:
+    name: Wyklucz bazę danych Home Assistanta
+    description: Pomiń home-assistant_v2.db w kopiach, żeby były mniejsze.
+  stop_addons:
+    name: Zatrzymuj dodatki podczas kopii
+    description: Slugi dodatków, oddzielone przecinkami, zatrzymywanych przed kopią i uruchamianych ponownie po niej (przydatne przy bazach danych).
+  expose_extra_server:
+    name: Udostępnij dodatkowy serwer WWW
+    description: Udostępniaj interfejs WWW także na osobnym porcie, poza ingressem Home Assistanta. Włącz razem z tym „Wymagaj logowania do Home Assistanta”.
+  confirm_multiple_deletes:
+    name: Pytaj przed usunięciem wielu kopii
+    description: Zatrzymaj się i zapytaj w interfejsie WWW przed usunięciem więcej niż jednej starej kopii naraz.
+  enable_proton_upload:
+    name: Przesyłaj kopie do Proton Drive
+    description: Gdy wyłączone, dodatek zarządza tylko kopiami w Home Assistancie.
+  proton_folder_name:
+    name: Folder w Proton Drive
+    description: Folder w katalogu głównym Proton Drive, w którym przechowywane są kopie. Użyj /, aby zagnieżdżać foldery, np. backups/ha. Użyj do tego osobnego folderu.
+  proton_cli_path:
+    name: Ścieżka do CLI proton-drive
+    description: Ścieżka do dołączonego CLI Proton Drive.
+  proton_data_path:
+    name: Ścieżka danych Proton
+    description: Gdzie CLI trzyma sesję, pęk kluczy i tymczasowe pliki transferu.
+  proton_drive_timeout_seconds:
+    name: Limit czasu CLI
+    description: Ile sekund czekać na operacje listowania i metadanych.
+  proton_transfer_timeout_seconds:
+    name: Limit czasu transferu
+    description: Ile sekund czekać na pojedyncze przesłanie lub pobranie.
+  permanently_delete:
+    name: Usuwaj kopie na stałe (także z kosza)
+    description: Usuwaj skasowane kopie także z kosza Proton Drive, żeby nie zajmowały Twojego limitu miejsca. Wyłącz, żeby dało się je odzyskać z kosza.
+  delete_ignored_after_days:
+    name: Usuń ignorowane kopie po
+    description: Liczba dni, po których ignorowane kopie są automatycznie usuwane. 0 trzyma je zawsze.
+  call_backup_snapshot:
+    name: Nazywaj kopie „snapshotami”
+    description: Używaj starszego określenia „snapshot” w powiadomieniach i sensorach.
+  background_color:
+    name: Kolor tła
+    description: 'Kolor tła interfejsu WWW, jako #RRGGBB. Puste oznacza kolor domyślny.'
+  accent_color:
+    name: Kolor akcentu
+    description: 'Kolor akcentu interfejsu WWW, jako #RRGGBB. Puste oznacza kolor domyślny.'
+  max_sync_interval_seconds:
+    name: Maks. odstęp między synchronizacjami
+    description: Najdłuższy czas, jaki dodatek czeka między synchronizacjami, w sekundach (co najmniej 300).
+  default_sync_interval_variation:
+    name: Zmienność odstępu synchronizacji
+    description: Losowy rozrzut okresowej synchronizacji, jako ułamek (0–1) maksymalnego odstępu. Przy 0.5 i 3 godzinach synchronizacje odbywają się co 1,5–3 godziny.
+  port:
+    name: Port dodatkowego serwera WWW
+    description: 'Port, na którym dodatkowy serwer WWW nasłuchuje wewnątrz dodatku. Domyślnie: 8471.'
+  log_level:
+    name: Poziom logowania (interfejs WWW)
+    description: Szczegółowość logu dla karty Logi interfejsu WWW i zgłoszeń błędów.
+  console_log_level:
+    name: Poziom logowania (konsola)
+    description: Szczegółowość karty Log dodatku w Home Assistancie.
+  max_backoff_seconds:
+    name: Maks. opóźnienie ponownej próby
+    description: Najdłuższe oczekiwanie między próbami po nieudanej synchronizacji, w sekundach (co najmniej 3600).
+  ha_reporting_interval_seconds:
+    name: Odstęp aktualizacji sensorów
+    description: Jak często dodatek aktualizuje swoje sensory w Home Assistancie, w sekundach.
+network:
+  8471/tcp: Dodatkowy serwer WWW, poza ingressem (tylko z włączonym „Udostępnij dodatkowy serwer WWW”).

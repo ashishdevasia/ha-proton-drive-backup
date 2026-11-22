@@ -1,0 +1,161 @@
+# Nomi e descrizioni per la scheda Configurazione dell'add-on in Home
+# Assistant. Vedi en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Backup da conservare in Home Assistant
+    description: Quanti backup recenti conservare su questa macchina; il più vecchio viene eliminato per primo. Con 0 non viene mai eliminato nulla da Home Assistant (per non tenere copie locali, attiva invece «Elimina da Home Assistant dopo il caricamento»).
+  max_backups_in_proton_drive:
+    name: Backup da conservare in Proton Drive
+    description: Quanti backup recenti conservare in Proton Drive; il più vecchio viene eliminato per primo. Con 0 non viene mai eliminato nulla da Proton Drive.
+  days_between_backups:
+    name: Giorni tra i backup
+    description: Ogni quanto viene creato un nuovo backup, in giorni (decimali ammessi). Se è impostata un'ora del giorno, viene arrotondato per eccesso a giorni interi. 0 disattiva i backup pianificati.
+  ignore_other_backups:
+    name: Ignora i backup creati altrove
+    description: Non gestire né eliminare i backup che non sono stati creati da questo add-on.
+  ignore_upgrade_backups:
+    name: Ignora i backup di aggiornamento
+    description: Non contare i backup che Home Assistant crea automaticamente durante gli aggiornamenti.
+  backup_storage:
+    name: Posizione dei backup
+    description: Nome dell'archiviazione di rete di Home Assistant in cui creare i backup, oppure local-disk. Vuoto usa la posizione predefinita di Home Assistant.
+  delete_after_upload:
+    name: Elimina da Home Assistant dopo il caricamento
+    description: Conserva i backup solo in Proton Drive dopo il caricamento.
+  delete_before_new_backup:
+    name: Elimina il vecchio backup prima di crearne uno nuovo
+    description: 'Utile quando lo spazio su disco è poco: prima viene rimosso il backup più vecchio.'
+  use_ssl:
+    name: Usa SSL
+    description: Usa HTTPS per il server web aggiuntivo, con «File del certificato» e «File della chiave».
+  certfile:
+    name: File del certificato
+    description: 'Certificato per «Usa SSL». Predefinito: /ssl/fullchain.pem.'
+  keyfile:
+    name: File della chiave
+    description: 'Chiave privata per «Usa SSL». Predefinito: /ssl/privkey.pem.'
+  require_login:
+    name: Richiedi il login di Home Assistant
+    description: Chiedi nome utente e password di un amministratore di Home Assistant sul server web aggiuntivo. Lascialo attivo ogni volta che il server aggiuntivo è esposto.
+  backup_name:
+    name: Modello di nome
+    description: Modello per i nomi dei backup, es. {type} Backup {year}-{month}-{day}. Le impostazioni dell'interfaccia web elencano tutti i segnaposto.
+  backup_time_of_day:
+    name: Ora del giorno
+    description: Ora locale in cui creare i backup pianificati, come HH:MM (24 ore). Vuoto significa qualsiasi ora.
+  warn_for_low_space:
+    name: Avvisa quando lo spazio è poco
+    description: Controlla lo spazio libero su disco prima di creare un backup e fermati con un avviso se è poco.
+  watch_backup_directory:
+    name: Controlla la cartella dei backup
+    description: Accorgiti subito dei file di backup nuovi o rimossi, invece che alla sincronizzazione successiva.
+  generational_days:
+    name: Backup giornalieri da conservare
+    description: 'Backup generazionali: quanti backup giornalieri conservare. Finché è impostata un''opzione generazionale, 0 vale come 1, quindi il backup più recente viene sempre conservato.'
+  generational_weeks:
+    name: Backup settimanali da conservare
+    description: 'Backup generazionali: quanti backup settimanali conservare.'
+  generational_months:
+    name: Backup mensili da conservare
+    description: 'Backup generazionali: quanti backup mensili conservare.'
+  generational_years:
+    name: Backup annuali da conservare
+    description: 'Backup generazionali: quanti backup annuali conservare.'
+  generational_day_of_year:
+    name: Giorno del backup annuale
+    description: Giorno dell'anno (1–365) il cui backup viene conservato come annuale.
+  generational_day_of_month:
+    name: Giorno del backup mensile
+    description: Giorno del mese (1–31) il cui backup viene conservato come mensile.
+  generational_day_of_week:
+    name: Giorno del backup settimanale
+    description: Giorno della settimana il cui backup viene conservato come settimanale.
+  generational_delete_early:
+    name: Elimina presto i backup in più
+    description: Rimuovi i backup ridondanti prima di raggiungere il limite.
+  notify_for_stale_backups:
+    name: Avvisa quando i backup non sono aggiornati
+    description: Invia una notifica persistente se i backup smettono di essere creati, anche quando sono in pausa perché l'add-on non ha effettuato l'accesso a Proton.
+  enable_backup_stale_sensor:
+    name: Sensore dei backup non aggiornati
+    description: Crea binary_sensor.backups_stale, che si attiva quando i backup non sono aggiornati.
+  enable_backup_state_sensor:
+    name: Sensore dello stato dei backup
+    description: Crea sensor.backup_state, che riporta lo stato dei tuoi backup.
+  backup_password:
+    name: Password dei backup
+    description: 'Crittografa i backup con questa password. Vuoto significa nessuna password. Conservala in un posto sicuro: serve per il ripristino.'
+  exclude_folders:
+    name: Escludi cartelle
+    description: Cartelle, separate da virgole, da lasciare fuori dai backup, es. share,media. Così i backup diventano parziali.
+  exclude_addons:
+    name: Escludi add-on
+    description: Slug degli add-on, separati da virgole, da lasciare fuori dai backup, es. core_mariadb. Così i backup diventano parziali.
+  exclude_ha_database:
+    name: Escludi il database di Home Assistant
+    description: Lascia home-assistant_v2.db fuori dai backup per renderli più piccoli.
+  stop_addons:
+    name: Ferma gli add-on durante il backup
+    description: Slug degli add-on, separati da virgole, da fermare prima di un backup e riavviare dopo (utile per i database).
+  expose_extra_server:
+    name: Esponi un server web aggiuntivo
+    description: Servi l'interfaccia web anche su una porta propria, fuori dall'ingress di Home Assistant. Attiva insieme «Richiedi il login di Home Assistant».
+  confirm_multiple_deletes:
+    name: Chiedi prima di eliminare più backup
+    description: Fermati e chiedi conferma nell'interfaccia web prima di eliminare più di un vecchio backup alla volta.
+  enable_proton_upload:
+    name: Carica i backup su Proton Drive
+    description: Se disattivato, l'add-on gestisce solo i backup dentro Home Assistant.
+  proton_folder_name:
+    name: Cartella di Proton Drive
+    description: Cartella, sotto la radice di Proton Drive, in cui salvare i backup. Usa / per le sottocartelle, es. backups/ha. Usa una cartella dedicata solo a questo.
+  proton_cli_path:
+    name: Percorso della CLI proton-drive
+    description: Percorso della CLI di Proton Drive inclusa.
+  proton_data_path:
+    name: Percorso dei dati di Proton
+    description: Dove la CLI tiene la sessione, il portachiavi e i file temporanei di trasferimento.
+  proton_drive_timeout_seconds:
+    name: Timeout della CLI
+    description: Secondi di attesa per le operazioni di elenco e sui metadati.
+  proton_transfer_timeout_seconds:
+    name: Timeout di trasferimento
+    description: Secondi di attesa per un singolo caricamento o download.
+  permanently_delete:
+    name: Elimina definitivamente i backup rimossi
+    description: Rimuovi i backup eliminati anche dal cestino di Proton Drive, così non contano più nella tua quota di spazio. Disattivalo per poterli recuperare dal cestino.
+  delete_ignored_after_days:
+    name: Elimina i backup ignorati dopo
+    description: Giorni dopo i quali i backup ignorati vengono eliminati automaticamente. 0 li conserva per sempre.
+  call_backup_snapshot:
+    name: Chiama i backup «snapshot»
+    description: Usa il vecchio termine «snapshot» nelle notifiche e nei sensori.
+  background_color:
+    name: Colore di sfondo
+    description: 'Colore di sfondo dell''interfaccia web, come #RRGGBB. Vuoto usa quello predefinito.'
+  accent_color:
+    name: Colore di accento
+    description: 'Colore di accento dell''interfaccia web, come #RRGGBB. Vuoto usa quello predefinito.'
+  max_sync_interval_seconds:
+    name: Intervallo massimo di sincronizzazione
+    description: Il tempo massimo che l'add-on aspetta tra una sincronizzazione e l'altra, in secondi (almeno 300).
+  default_sync_interval_variation:
+    name: Variazione dell'intervallo di sincronizzazione
+    description: Variazione casuale della sincronizzazione periodica, come frazione (0–1) dell'intervallo massimo. Con 0.5 e 3 ore, le sincronizzazioni avvengono a distanza di 1,5–3 ore.
+  port:
+    name: Porta del server web aggiuntivo
+    description: 'Porta su cui il server web aggiuntivo è in ascolto dentro l''add-on. Predefinita: 8471.'
+  log_level:
+    name: Livello di log (interfaccia web)
+    description: Livello di dettaglio conservato per la scheda Log dell'interfaccia web e le segnalazioni di bug.
+  console_log_level:
+    name: Livello di log (console)
+    description: Livello di dettaglio della scheda Log dell'add-on in Home Assistant.
+  max_backoff_seconds:
+    name: Attesa massima tra i tentativi
+    description: Attesa massima tra un tentativo e l'altro dopo una sincronizzazione fallita, in secondi (almeno 3600).
+  ha_reporting_interval_seconds:
+    name: Intervallo di aggiornamento dei sensori
+    description: Ogni quanto l'add-on aggiorna i suoi sensori in Home Assistant, in secondi.
+network:
+  8471/tcp: Server web aggiuntivo, fuori dall'ingress (solo con «Esponi un server web aggiuntivo» attivo).

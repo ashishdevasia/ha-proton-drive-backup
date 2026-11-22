@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timedelta, date
 from io import IOBase
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar, Union
@@ -18,6 +19,24 @@ from backup.logger import getLogger
 logger = getLogger(__name__)
 
 T = TypeVar('T')
+
+# A scheduled backup further ahead than this means none: dates near the last
+# one Python can hold (the end of year 9999) overflow when shown in a time zone
+# or when a day is added.  Far beyond the web UI's longest "Days between
+# backups" (36500); a larger one can only come from the Configuration tab.
+NO_BACKUP_AFTER = timedelta(days=1000 * 365)
+
+
+def addDays(when: datetime, days: float) -> Optional[datetime]:
+    """
+    when + days, or None ("never") if that's past any date Python can hold.
+    Settings can be any number config.json allows, e.g. "Delete ignored
+    backups after" 999999999 meant as "never"; failing would stop every sync.
+    """
+    try:
+        return when + timedelta(days=days)
+    except (OverflowError, ValueError):
+        return None
 
 
 class BackupSource(Trigger, Generic[T]):
@@ -159,7 +178,7 @@ class Model():
             # then the backups shoudl be made right when the addon starts up.
             next = self.info.start_time
         elif not timeofDay:
-            next = last_backup + timedelta(days=self.config.get(Setting.DAYS_BETWEEN_BACKUPS))
+            next = addDays(last_backup, self.config.get(Setting.DAYS_BETWEEN_BACKUPS))
         else:
             newest_local: datetime = self.time.toLocal(last_backup)
             time_that_day_local = self.time.localize(datetime(newest_local.year, newest_local.month, newest_local.day, timeofDay[0], timeofDay[1]))
@@ -167,10 +186,20 @@ class Model():
                 # Latest backup is before the backup time for that day
                 next = self.time.toUtc(time_that_day_local)
             else:
-                # return the next backup after the delta
-                next_date = date.fromordinal(int(date(newest_local.year, newest_local.month, newest_local.day).toordinal() + self.config.get(Setting.DAYS_BETWEEN_BACKUPS)))
-                next_datetime_local = self.time.localize(datetime(next_date.year, next_date.month, next_date.day, timeofDay[0], timeofDay[1]))
-                next = self.time.toUtc(next_datetime_local)
+                # The next backup is at the time of day, a whole number of days
+                # later: rounded up, since a fraction (e.g. 0.5) landed on the
+                # same day, at a time already passed, so every sync made another
+                # backup.
+                try:
+                    days = max(1, math.ceil(self.config.get(Setting.DAYS_BETWEEN_BACKUPS)))
+                    next_date = date.fromordinal(date(newest_local.year, newest_local.month, newest_local.day).toordinal() + days)
+                    next_datetime_local = self.time.localize(datetime(next_date.year, next_date.month, next_date.day, timeofDay[0], timeofDay[1]))
+                    next = self.time.toUtc(next_datetime_local)
+                except (OverflowError, ValueError):
+                    next = None  # past any date Python can hold
+
+        if next is not None and next - now > NO_BACKUP_AFTER:
+            next = None
 
         if next is None:
             self.waiting_for_startup = False
@@ -220,10 +249,12 @@ class Model():
 
         # Delete any "ignored" backups that have expired
         if (self.config.get(Setting.IGNORE_OTHER_BACKUPS) or self.config.get(Setting.IGNORE_UPGRADE_BACKUPS)) and self.config.get(Setting.DELETE_IGNORED_AFTER_DAYS) > 0:
-            cutoff = now - timedelta(days=self.config.get(Setting.DELETE_IGNORED_AFTER_DAYS))
+            # None: further back than any date (e.g. "999999999" days, meant
+            # as "never"), so nothing is old enough to delete.
+            cutoff = addDays(now, -self.config.get(Setting.DELETE_IGNORED_AFTER_DAYS))
             delete = []
             for backup in self.backups.values():
-                if backup.ignore() and backup.date() < cutoff:
+                if cutoff is not None and backup.ignore() and backup.date() < cutoff:
                     delete.append(backup)
             for backup in delete:
                 await self.deleteBackup(backup, self.source)

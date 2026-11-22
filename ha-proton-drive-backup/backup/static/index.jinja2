@@ -37,6 +37,9 @@
   {# mock.js is a dev-only API stub (activated with ?mock=1). It is NOT served
      in production — only the standalone devserver.py sets devMock. #}
   {% if devMock %}<script src="static/{{ version }}/app/mock.js"></script>{% endif %}
+  {# i18n.js picks the language and loads app/locales/<lang>.json; it sets
+     <html lang> before the app renders. #}
+  <script src="static/{{ version }}/app/i18n.js"></script>
   <script src="static/{{ version }}/app/app.js"></script>
 </body>
 </html>

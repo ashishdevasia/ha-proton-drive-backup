@@ -17,6 +17,20 @@ the scheduling, retention, and Home Assistant integration are unchanged.
 
 Once signed in, backups sync automatically.
 
+## Language
+
+The Web UI and the option names in the Configuration tab follow your Home
+Assistant language when it's English, German, Spanish, French, Italian, Dutch,
+Polish, Brazilian Portuguese or Malayalam. For any other language the
+Configuration tab is in English, and the Web UI uses your browser's language
+if it's one of those, otherwise English. On the
+extra server (outside ingress) the Web UI follows your browser's language.
+
+Some text stays in English: the add-on's log, messages from the Proton Drive
+CLI, the add-on's Home Assistant notifications and sensor names, and error
+messages that include details from the add-on (such as a server's reply).
+Backup names are never translated.
+
 ## Options
 
 ### Core backup options
@@ -30,7 +44,8 @@ Once signed in, backups sync automatically.
   Proton Drive.
 - `days_between_backups` (default `3`): how often to create a new backup. `0` disables automatic backups.
 - `backup_name`: template for backup names (e.g. `{type} Backup {year}-{month}-{day}`).
-- `backup_time_of_day`: `HH:MM` time of day to create backups.
+- `backup_time_of_day`: `HH:MM` time of day to create backups. With it set, `days_between_backups` is
+  rounded up to whole days (`0.5` means every day).
 - `delete_after_upload`: delete a backup from Home Assistant once it reaches Proton Drive.
 - `delete_before_new_backup`: purge old backups before creating a new one.
 - `ignore_other_backups` / `ignore_upgrade_backups`: ignore backups not created by this app.

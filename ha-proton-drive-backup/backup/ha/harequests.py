@@ -345,10 +345,9 @@ class HaRequests():
 
     @supervisor_call
     async def updateConfig(self, config):
-        # Supervisor rejects the entire options update if it contains any key
-        # the add-on doesn't declare in config.json, so only send declared
-        # options.  Internal-only Settings (kept in memory for the model) are
-        # dropped here rather than persisted.
+        # Only send options config.json declares.  Supervisor drops any other
+        # key with a warning in its log, and internal-only Settings (kept in
+        # memory for the model) aren't user options anyway.
         options = {k: v for k, v in config.items() if k in ADDON_OPTION_KEYS}
         dropped = [k for k in config if k not in ADDON_OPTION_KEYS]
         if dropped:

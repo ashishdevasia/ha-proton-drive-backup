@@ -1,0 +1,162 @@
+# Names and descriptions for the add-on's Configuration tab in Home Assistant
+# (one file per language; Home Assistant falls back to en.yaml). Every option
+# in config.json needs an entry; tests/test_translations.py checks that.
+configuration:
+  max_backups_in_ha:
+    name: Backups to keep in Home Assistant
+    description: Most recent backups to keep on this machine; the oldest is deleted first. 0 never deletes from Home Assistant (to keep no local copies, turn on "Delete from Home Assistant after upload" instead).
+  max_backups_in_proton_drive:
+    name: Backups to keep in Proton Drive
+    description: Most recent backups to keep in Proton Drive; the oldest is deleted first. 0 never deletes from Proton Drive.
+  days_between_backups:
+    name: Days between backups
+    description: How often a new backup is created, in days (decimals allowed). With a time of day set, it's rounded up to whole days. 0 disables scheduled backups.
+  ignore_other_backups:
+    name: Ignore backups made elsewhere
+    description: Don't manage or delete backups this add-on didn't create.
+  ignore_upgrade_backups:
+    name: Ignore upgrade backups
+    description: Don't count the backups Home Assistant makes automatically during upgrades.
+  backup_storage:
+    name: Backup location
+    description: Name of the Home Assistant network storage to create backups in, or local-disk. Empty uses Home Assistant's default backup location.
+  delete_after_upload:
+    name: Delete from Home Assistant after upload
+    description: Keep backups only in Proton Drive once they're uploaded.
+  delete_before_new_backup:
+    name: Delete old backup before making a new one
+    description: 'Useful when disk space is tight: removes the oldest backup first.'
+  use_ssl:
+    name: Use SSL
+    description: Serve the extra web server over HTTPS, using "Certificate file" and "Key file".
+  certfile:
+    name: Certificate file
+    description: 'Certificate for "Use SSL". Default: /ssl/fullchain.pem.'
+  keyfile:
+    name: Key file
+    description: 'Private key for "Use SSL". Default: /ssl/privkey.pem.'
+  require_login:
+    name: Require Home Assistant login
+    description: Ask for a Home Assistant administrator's username and password on the extra web server. Keep this on whenever the extra server is exposed.
+  backup_name:
+    name: Naming template
+    description: Template for backup names, e.g. {type} Backup {year}-{month}-{day}. The web UI's settings list every placeholder.
+  backup_time_of_day:
+    name: Time of day
+    description: Local time to create scheduled backups, as HH:MM (24-hour). Empty means any time.
+  warn_for_low_space:
+    name: Warn when low on space
+    description: Check free disk space before creating a backup, and stop with a warning when it's low.
+  watch_backup_directory:
+    name: Watch the backup directory
+    description: Notice new or removed backup files right away instead of at the next sync.
+  generational_days:
+    name: Daily backups to keep
+    description: 'Generational backups: how many daily backups to keep. While any generational option is set, 0 is treated as 1, so the newest backup is always kept.'
+  generational_weeks:
+    name: Weekly backups to keep
+    description: 'Generational backups: how many weekly backups to keep.'
+  generational_months:
+    name: Monthly backups to keep
+    description: 'Generational backups: how many monthly backups to keep.'
+  generational_years:
+    name: Yearly backups to keep
+    description: 'Generational backups: how many yearly backups to keep.'
+  generational_day_of_year:
+    name: Yearly backup day
+    description: Day of the year (1–365) whose backup is kept as the yearly one.
+  generational_day_of_month:
+    name: Monthly backup day
+    description: Day of the month (1–31) whose backup is kept as the monthly one.
+  generational_day_of_week:
+    name: Weekly backup day
+    description: Day of the week whose backup is kept as the weekly one.
+  generational_delete_early:
+    name: Delete extra backups early
+    description: Remove redundant backups before the count limit is reached.
+  notify_for_stale_backups:
+    name: Notify when backups are stale
+    description: Send a persistent notification if backups stop happening, including when they pause because the add-on is signed out of Proton.
+  enable_backup_stale_sensor:
+    name: Stale backups sensor
+    description: Create binary_sensor.backups_stale, which turns on when backups are stale.
+  enable_backup_state_sensor:
+    name: Backup state sensor
+    description: Create sensor.backup_state, which reports the state of your backups.
+  backup_password:
+    name: Backup password
+    description: 'Encrypt backups with this password. Empty means no password. Keep it somewhere safe: restoring needs it.'
+  exclude_folders:
+    name: Exclude folders
+    description: Comma-separated folders to leave out of backups, e.g. share,media. Setting this makes backups partial.
+  exclude_addons:
+    name: Exclude add-ons
+    description: Comma-separated add-on slugs to leave out of backups, e.g. core_mariadb. Setting this makes backups partial.
+  exclude_ha_database:
+    name: Exclude the Home Assistant database
+    description: Leave home-assistant_v2.db out of backups to make them smaller.
+  stop_addons:
+    name: Stop add-ons during backup
+    description: Comma-separated add-on slugs to stop before a backup and start again afterwards (useful for databases).
+  expose_extra_server:
+    name: Expose extra web server
+    description: Also serve the web UI on its own port, outside Home Assistant ingress. Turn on "Require Home Assistant login" with it.
+  confirm_multiple_deletes:
+    name: Ask before deleting multiple backups
+    description: Pause and ask in the web UI before deleting more than one old backup at once.
+  enable_proton_upload:
+    name: Upload backups to Proton Drive
+    description: When off, the add-on only manages backups inside Home Assistant.
+  proton_folder_name:
+    name: Proton Drive folder
+    description: Folder under Proton Drive's root where backups are stored. Use / to nest folders, e.g. backups/ha. Give it a folder of its own.
+  proton_cli_path:
+    name: proton-drive CLI path
+    description: Path to the bundled Proton Drive CLI.
+  proton_data_path:
+    name: Proton data path
+    description: Where the CLI keeps its session, keyring and temporary transfer files.
+  proton_drive_timeout_seconds:
+    name: CLI timeout
+    description: Seconds to wait for listing and metadata operations.
+  proton_transfer_timeout_seconds:
+    name: Transfer timeout
+    description: Seconds to wait for a single upload or download.
+  permanently_delete:
+    name: Permanently delete removed backups
+    description: Also remove deleted backups from Proton Drive's trash, so they stop counting toward your storage quota. Turn off to keep them recoverable in the trash.
+  delete_ignored_after_days:
+    name: Delete ignored backups after
+    description: Days after which ignored backups are deleted automatically. 0 keeps them forever.
+  call_backup_snapshot:
+    name: Call backups "snapshots"
+    description: Use the older term "snapshot" in notifications and sensors.
+  background_color:
+    name: Background color
+    description: 'Background color of the web UI, as #RRGGBB. Empty uses the default.'
+  accent_color:
+    name: Accent color
+    description: 'Accent color of the web UI, as #RRGGBB. Empty uses the default.'
+  max_sync_interval_seconds:
+    name: Max sync interval
+    description: Longest the add-on waits between syncs, in seconds (at least 300).
+  default_sync_interval_variation:
+    name: Sync interval variation
+    description: Random spread of the periodic sync, as a fraction (0–1) of the max sync interval. With 0.5 and 3 hours, syncs happen 1.5 to 3 hours apart.
+  port:
+    name: Extra web server port
+    description: 'Port the extra web server listens on inside the add-on. Default: 8471.'
+  log_level:
+    name: Log level (web UI)
+    description: Detail kept for the web UI's Logs tab and bug reports.
+  console_log_level:
+    name: Log level (console)
+    description: Detail shown in the add-on's Log tab in Home Assistant.
+  max_backoff_seconds:
+    name: Max retry delay
+    description: Longest wait between retries after a failed sync, in seconds (at least 3600).
+  ha_reporting_interval_seconds:
+    name: Sensor update interval
+    description: How often the add-on updates its sensors in Home Assistant, in seconds.
+network:
+  8471/tcp: Extra web server, outside ingress (only with "Expose extra web server" on).

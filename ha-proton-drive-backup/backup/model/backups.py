@@ -231,7 +231,10 @@ class Backup(object):
             ret['progress'] = self._upload_source.progress()
             ret['speed'] = self._upload_source.speed(timedelta(seconds=20))
             ret['total'] = self._upload_source.position()
-            ret['started'] = time.formatDelta(self._upload_source.startTime())
+            started = self._upload_source.startTime()
+            ret['started'] = time.formatDelta(started)
+            # Epoch seconds, so the web UI can phrase it in the viewer's language.
+            ret['started_timestamp'] = started.timestamp()
         return ret
 
     def protected(self) -> bool:

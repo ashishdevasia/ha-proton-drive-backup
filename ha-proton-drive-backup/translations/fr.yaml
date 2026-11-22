@@ -1,0 +1,162 @@
+# Names and descriptions for the add-on's Configuration tab in Home Assistant
+# (one file per language; Home Assistant falls back to en.yaml). Every option
+# in config.json needs an entry; tests/test_translations.py checks that.
+configuration:
+  max_backups_in_ha:
+    name: Sauvegardes à garder dans Home Assistant
+    description: Nombre de sauvegardes récentes à garder sur cette machine ; la plus ancienne est supprimée en premier. 0 ne supprime jamais de Home Assistant (pour ne garder aucune copie locale, activez plutôt « Supprimer de Home Assistant après l'envoi »).
+  max_backups_in_proton_drive:
+    name: Sauvegardes à garder dans Proton Drive
+    description: Nombre de sauvegardes récentes à garder dans Proton Drive ; la plus ancienne est supprimée en premier. 0 ne supprime jamais de Proton Drive.
+  days_between_backups:
+    name: Jours entre deux sauvegardes
+    description: Fréquence de création d'une nouvelle sauvegarde, en jours (décimales acceptées). Avec une heure fixée, elle est arrondie au jour supérieur. 0 désactive les sauvegardes planifiées.
+  ignore_other_backups:
+    name: Ignorer les sauvegardes créées ailleurs
+    description: Ne gère ni ne supprime les sauvegardes que ce module n'a pas créées.
+  ignore_upgrade_backups:
+    name: Ignorer les sauvegardes de mise à jour
+    description: Ne compte pas les sauvegardes que Home Assistant crée automatiquement lors des mises à jour.
+  backup_storage:
+    name: Emplacement des sauvegardes
+    description: Nom du stockage réseau Home Assistant où créer les sauvegardes, ou local-disk. Vide utilise l'emplacement de sauvegarde par défaut de Home Assistant.
+  delete_after_upload:
+    name: Supprimer de Home Assistant après l'envoi
+    description: Ne garde les sauvegardes que dans Proton Drive une fois envoyées.
+  delete_before_new_backup:
+    name: Supprimer l'ancienne sauvegarde avant d'en créer une nouvelle
+    description: 'Utile quand l''espace disque est limité : supprime d''abord la sauvegarde la plus ancienne.'
+  use_ssl:
+    name: Utiliser SSL
+    description: Utilise HTTPS pour le serveur web supplémentaire, avec le « Fichier de certificat » et le « Fichier de clé ».
+  certfile:
+    name: Fichier de certificat
+    description: 'Certificat pour « Utiliser SSL ». Par défaut : /ssl/fullchain.pem.'
+  keyfile:
+    name: Fichier de clé
+    description: 'Clé privée pour « Utiliser SSL ». Par défaut : /ssl/privkey.pem.'
+  require_login:
+    name: Exiger la connexion Home Assistant
+    description: Demande l'identifiant et le mot de passe d'un administrateur Home Assistant sur le serveur web supplémentaire. Gardez cette option activée dès que ce serveur est exposé.
+  backup_name:
+    name: Modèle de nom
+    description: Modèle pour le nom des sauvegardes, ex. {type} Backup {year}-{month}-{day}. Les réglages de l'interface web listent toutes les variables.
+  backup_time_of_day:
+    name: Heure
+    description: Heure locale de création des sauvegardes planifiées, au format HH:MM (24 h). Laisser vide pour n'importe quelle heure.
+  warn_for_low_space:
+    name: Avertir en cas d'espace insuffisant
+    description: Vérifie l'espace disque libre avant de créer une sauvegarde, et s'arrête avec un avertissement s'il est insuffisant.
+  watch_backup_directory:
+    name: Surveiller le dossier des sauvegardes
+    description: Détecte immédiatement les fichiers de sauvegarde ajoutés ou supprimés, au lieu d'attendre la prochaine synchronisation.
+  generational_days:
+    name: Sauvegardes quotidiennes à garder
+    description: 'Sauvegardes générationnelles : nombre de sauvegardes quotidiennes à garder. Dès qu''une option générationnelle est définie, 0 est traité comme 1 : la sauvegarde la plus récente est toujours gardée.'
+  generational_weeks:
+    name: Sauvegardes hebdomadaires à garder
+    description: 'Sauvegardes générationnelles : nombre de sauvegardes hebdomadaires à garder.'
+  generational_months:
+    name: Sauvegardes mensuelles à garder
+    description: 'Sauvegardes générationnelles : nombre de sauvegardes mensuelles à garder.'
+  generational_years:
+    name: Sauvegardes annuelles à garder
+    description: 'Sauvegardes générationnelles : nombre de sauvegardes annuelles à garder.'
+  generational_day_of_year:
+    name: Jour de la sauvegarde annuelle
+    description: Jour de l'année (1–365) dont la sauvegarde est gardée comme sauvegarde annuelle.
+  generational_day_of_month:
+    name: Jour de la sauvegarde mensuelle
+    description: Jour du mois (1–31) dont la sauvegarde est gardée comme sauvegarde mensuelle.
+  generational_day_of_week:
+    name: Jour de la sauvegarde hebdomadaire
+    description: Jour de la semaine dont la sauvegarde est gardée comme sauvegarde hebdomadaire.
+  generational_delete_early:
+    name: Supprimer au plus tôt les sauvegardes en trop
+    description: Retire les sauvegardes redondantes avant que la limite soit atteinte.
+  notify_for_stale_backups:
+    name: Prévenir si les sauvegardes sont en retard
+    description: Envoie une notification persistante si les sauvegardes s'arrêtent, y compris quand elles sont suspendues parce que le module est déconnecté de Proton.
+  enable_backup_stale_sensor:
+    name: Capteur de sauvegardes en retard
+    description: Crée binary_sensor.backups_stale, qui s'active quand les sauvegardes sont en retard.
+  enable_backup_state_sensor:
+    name: Capteur d'état des sauvegardes
+    description: Crée sensor.backup_state, qui indique l'état de vos sauvegardes.
+  backup_password:
+    name: Mot de passe de sauvegarde
+    description: 'Chiffre les sauvegardes avec ce mot de passe. Laisser vide pour ne pas chiffrer. Conservez-le en lieu sûr : il est indispensable pour restaurer.'
+  exclude_folders:
+    name: Dossiers à exclure
+    description: Dossiers à laisser hors des sauvegardes, séparés par des virgules, ex. share,media. Les sauvegardes deviennent alors partielles.
+  exclude_addons:
+    name: Modules à exclure
+    description: Identifiants (slugs) des modules à laisser hors des sauvegardes, séparés par des virgules, ex. core_mariadb. Les sauvegardes deviennent alors partielles.
+  exclude_ha_database:
+    name: Exclure la base de données de Home Assistant
+    description: Laisse home-assistant_v2.db hors des sauvegardes pour les rendre plus petites.
+  stop_addons:
+    name: Arrêter des modules pendant la sauvegarde
+    description: Identifiants (slugs) des modules à arrêter avant une sauvegarde et à redémarrer ensuite, séparés par des virgules (utile pour les bases de données).
+  expose_extra_server:
+    name: Activer le serveur web supplémentaire
+    description: Rend aussi l'interface web accessible sur son propre port, en dehors de l'ingress de Home Assistant. Activez aussi « Exiger la connexion Home Assistant ».
+  confirm_multiple_deletes:
+    name: Demander avant de supprimer plusieurs sauvegardes
+    description: Fait une pause et demande dans l'interface web avant de supprimer plusieurs anciennes sauvegardes à la fois.
+  enable_proton_upload:
+    name: Envoyer les sauvegardes vers Proton Drive
+    description: Si désactivé, le module gère uniquement les sauvegardes dans Home Assistant.
+  proton_folder_name:
+    name: Dossier Proton Drive
+    description: Dossier à la racine de Proton Drive où les sauvegardes sont stockées. Utilisez / pour imbriquer des dossiers, ex. backups/ha. Utilisez un dossier dédié.
+  proton_cli_path:
+    name: Chemin du CLI proton-drive
+    description: Chemin du CLI Proton Drive fourni avec le module.
+  proton_data_path:
+    name: Chemin des données Proton
+    description: Emplacement où le CLI garde sa session, son trousseau et ses fichiers de transfert temporaires.
+  proton_drive_timeout_seconds:
+    name: Délai d'attente du CLI
+    description: Secondes d'attente pour les opérations de liste et de métadonnées.
+  proton_transfer_timeout_seconds:
+    name: Délai d'attente des transferts
+    description: Secondes d'attente pour un seul envoi ou téléchargement.
+  permanently_delete:
+    name: Supprimer définitivement les sauvegardes retirées
+    description: Retire aussi les sauvegardes supprimées de la corbeille de Proton Drive, pour qu'elles ne comptent plus dans votre quota de stockage. Désactivez pour pouvoir les récupérer depuis la corbeille.
+  delete_ignored_after_days:
+    name: Supprimer les sauvegardes ignorées après
+    description: Nombre de jours après lequel les sauvegardes ignorées sont supprimées automatiquement. 0 les garde indéfiniment.
+  call_backup_snapshot:
+    name: Appeler les sauvegardes « snapshots »
+    description: Utilise l'ancien terme « snapshot » dans les notifications et les capteurs.
+  background_color:
+    name: Couleur de fond
+    description: 'Couleur de fond de l''interface web, au format #RRGGBB. Laisser vide pour la couleur par défaut.'
+  accent_color:
+    name: Couleur d'accent
+    description: 'Couleur d''accent de l''interface web, au format #RRGGBB. Laisser vide pour la couleur par défaut.'
+  max_sync_interval_seconds:
+    name: Intervalle max entre synchronisations
+    description: Durée maximale entre deux synchronisations, en secondes (au moins 300).
+  default_sync_interval_variation:
+    name: Variation de l'intervalle de synchronisation
+    description: Écart aléatoire de la synchronisation périodique, en fraction (0–1) de l'intervalle max. Avec 0.5 et 3 heures, les synchronisations ont lieu toutes les 1,5 à 3 heures.
+  port:
+    name: Port du serveur web supplémentaire
+    description: 'Port d''écoute du serveur web supplémentaire dans le module. Par défaut : 8471.'
+  log_level:
+    name: Niveau de journal (interface web)
+    description: Niveau de détail conservé pour l'onglet Journal de l'interface web et les rapports de bug.
+  console_log_level:
+    name: Niveau de journal (console)
+    description: Niveau de détail affiché dans l'onglet Journal du module dans Home Assistant.
+  max_backoff_seconds:
+    name: Délai max entre les tentatives
+    description: Attente maximale entre deux tentatives après un échec de synchronisation, en secondes (au moins 3600).
+  ha_reporting_interval_seconds:
+    name: Intervalle de mise à jour des capteurs
+    description: Fréquence de mise à jour des capteurs du module dans Home Assistant, en secondes.
+network:
+  8471/tcp: Serveur web supplémentaire, hors ingress (uniquement avec « Activer le serveur web supplémentaire »).

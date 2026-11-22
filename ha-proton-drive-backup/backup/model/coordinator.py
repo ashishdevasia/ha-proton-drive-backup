@@ -19,6 +19,12 @@ from random import Random
 
 logger = getLogger(__name__)
 
+# The longest wait before the next sync.  "Max sync interval" can be set to
+# anything in the Configuration tab (e.g. "3000000 days"), past any date Python
+# can hold; 100 years means "not on a schedule".  (The error backoff needs no
+# limit: Backoff never waits longer than 10 * 2**20 seconds, about 121 days.)
+LONGEST_SYNC_WAIT_SECONDS = 100 * 365 * 24 * 60 * 60
+
 
 @singleton
 class Coordinator(Trigger):
@@ -124,7 +130,7 @@ class Coordinator(Trigger):
             if scheduled is None:
                 scheduled = self._time.now() - timedelta(minutes=1)
             else:
-                scheduled += timedelta(seconds=self.nextSyncCheckOffset())
+                scheduled += timedelta(seconds=min(self.nextSyncCheckOffset(), LONGEST_SYNC_WAIT_SECONDS))
             next_backup = self.nextBackupTime()
             if next_backup is None:
                 return scheduled

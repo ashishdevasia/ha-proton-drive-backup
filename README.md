@@ -54,6 +54,17 @@ bundles. As a result:
   archive, since Proton Drive has no file-property API.
 - Only `aarch64` and `amd64` are supported (the CLI only ships these).
 
+## Translations
+
+The Web UI and the Configuration tab are available in English, German, Spanish,
+French, Italian, Dutch, Polish, Brazilian Portuguese and Malayalam.
+
+**Help wanted:** most of these translations haven't been checked by a native
+speaker yet. If you speak one of these languages, please look through the app and
+[open an issue](https://github.com/ashishdevasia/ha-proton-drive-backup/issues) or a pull request for anything that reads wrong or
+unnatural. Translations into other languages are welcome too; the steps are in
+[the Web UI's README](ha-proton-drive-backup/backup/static/app/README.md#translations).
+
 ## License
 
 MIT. Derived from
