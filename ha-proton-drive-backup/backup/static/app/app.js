@@ -1901,11 +1901,16 @@
   // boot() does for the catalogs. Reloading the page instead could land on
   // Home Assistant's bare "502: Bad Gateway" page while the add-on restarts,
   // and nothing on that page tries again.
+  //
+  // The address is the one index.jinja2 wrote into the page's own <script>
+  // tag. Don't build it from VERSION: that comes out of the bootstrap JSON,
+  // and page text must not end up in a script URL (CodeQL js/xss-through-dom).
   function retryI18n(attempt) {
+    var first = document.querySelector('script[src$="/app/i18n.js"]');
+    if (!first) return;  // index.jinja2 always has it; test_translations.py checks
     setTimeout(function () {
-      var first = document.querySelector('script[src$="/app/i18n.js"]');
       var script = document.createElement("script");
-      script.src = (first ? first.getAttribute("src") : "static/" + VERSION + "/app/i18n.js") + "?retry=" + attempt;
+      script.src = first.getAttribute("src") + "?retry=" + attempt;
       script.onload = function () {
         if (window.I18n) { I18n = window.I18n; t = I18n.t; boot(); return; }
         script.remove(); retryI18n(attempt + 1);  // it loaded but didn't run

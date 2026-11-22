@@ -62,6 +62,14 @@ def test_index_loads_i18n_before_the_app():
     assert 0 <= page.index("app/i18n.js") < page.index("app/app.js")
 
 
+def test_app_can_find_the_i18n_script_tag_to_retry_it():
+    # retryI18n() in app.js reloads i18n.js from the address in this tag, which
+    # it finds with script[src$="/app/i18n.js"]. It has no other address to use.
+    page = _read(ADDON / "backup" / "static" / "index.jinja2")
+    assert re.search(r'<script src="[^"]*/app/i18n\.js">', page)
+    assert """querySelector('script[src$="/app/i18n.js"]')""" in _read(APP / "app.js")
+
+
 # --- Configuration tab --------------------------------------------------------
 
 @pytest.mark.parametrize("lang", LANGS)
