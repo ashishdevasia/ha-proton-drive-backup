@@ -1,55 +1,25 @@
 ## v0.4.0 [2026-11-22]
 
-- The add-on is now translated into German, Spanish, French, Italian, Dutch, Polish, Brazilian Portuguese and
-  Malayalam: its web UI and its Configuration tab in Home Assistant follow your Home Assistant language. For other
-  languages the web UI tries your browser's language, then English. Most translations haven't been checked by a
-  native speaker yet: corrections are welcome (see the README)
+- Translated into German, Spanish, French, Italian, Dutch, Polish, Brazilian Portuguese and Malayalam: the web UI
+  and the Configuration tab follow your Home Assistant language. Most translations haven't been checked by a native
+  speaker yet; corrections are welcome (see the README)
 - The Configuration tab shows readable names and descriptions instead of raw option keys
 - The web UI shows dates and times in your language and in Home Assistant's time zone
+- Fixed: a plain number in the web UI's "Delete ignored backups after" counted as seconds, not days, so backups the
+  add-on didn't make could be deleted seconds after they appeared
+- Fixed: "Days between backups" under 1 with a time of day set made a backup on every sync; with a time of day it's
+  now rounded up to whole days
+- Fixed: very large values in the time settings (e.g. `9999` yearly backups) could stop every sync; the web UI now
+  checks the values you change
+- Fixed: changes to the log levels or "Watch the backup directory for changes" could be silently undone
 - Removed options that had no effect: `verbose`, `send_error_reports`, `specify_backup_folder`,
-  `disable_watchdog_when_stopping` (an add-on's watchdog is always turned off while it's stopped for a backup),
-  `maximum_upload_chunk_bytes` and `upload_limit_bytes_per_second` (the Proton Drive CLI does the transfers)
-- Fixed: if the web UI was opened while the add-on was still starting, it stayed on "Couldn't reach the add-on"
-  instead of recovering on its own
-- Fixed: changes to the log levels or "Watch the backup directory for changes" could be silently undone, e.g. turning
-  the watch back on, or setting a log level back to "— default —"
-- Fixed: in the web UI, a plain number in "Delete ignored backups after" counted as seconds, not days. With the
-  default settings that meant every backup the add-on didn't make (Home Assistant's own scheduled, manual and
-  pre-update backups) was deleted about that many seconds after it appeared. `30` now means 30 days, as it does in
-  the Configuration tab (see **Breaking** below). Apart from a plain number on its own, every number in a duration
-  now needs a unit: `30,` or `1d 12` is rejected rather than partly read as seconds
-- Fixed: with "Days between backups" under 1 and a time of day set, every sync made a backup and deleted the oldest,
-  over and over. With a time of day it's now rounded up to whole days: `0.5` means every day, and `1.5` every 2
-  days (it was every day)
-- Fixed: a huge "Days between backups" (millions of days, e.g. meant as "never") stopped every sync and broke the
-  status page and sensors; it now means no scheduled backups
-- Fixed: a large generational count, such as `9999` yearly backups meant as "forever", stopped every sync, and
-  large daily or weekly counts slowed each sync down
-- Fixed: a very large "Delete ignored backups after", such as `999999 days` meant as "never", stopped every sync;
-  now nothing is deleted
-- Fixed: a huge duration set in the Configuration tab, such as "Max sync interval", could stop syncs, keep the web
-  UI's Settings tab from loading, or make every save there fail
-- Fixed: saving the web UI's settings rounded durations set in the Configuration tab, e.g. 0.999 days became 0.99899
-- Fixed: the web UI couldn't save its settings when "Days between backups" or a Proton Drive timeout set in the
-  Configuration tab had more decimals than the field allowed, e.g. `0.25`. A number field hidden by "Show advanced"
-  that held text the browser couldn't read as a number was saved as its default; now the save is refused
-- The web UI checks the values you change: "Days between backups" from 0.1 to 36500 (or 0 for none), "Delete
-  ignored backups after" at least 1 day (or blank for never), generational counts up to 3650 days, 520 weeks, 1200
-  months or 100 years, and "Max sync interval" up to 30 days. The Configuration tab doesn't limit them, and the web
-  UI keeps a value set there when you save other changes
-- Fixed: the web UI accepted a "Max sync interval" under 5 minutes, which Home Assistant then refused, so the whole
-  save failed
-- Fixed: the "Max sync interval" help suggested `1:30:00`, which the add-on rejects
-- Fixed: after one failed attempt to fetch Proton Drive's backup list ahead of a sync, the add-on stopped doing so
-  until it restarted, instead of for a day
-- Removed an unused dependency (dnspython)
+  `disable_watchdog_when_stopping`, `maximum_upload_chunk_bytes` and `upload_limit_bytes_per_second`
+- Removed an unused dependency
+- Bug-fixes
 
-**Breaking:** a plain number in the web UI's "Delete ignored backups after" now means days, not seconds. When the
-  updated add-on first starts, it corrects a value that looks saved that way (`30` saved as 30 seconds becomes 30
-  days): one under an hour, or one that nothing you'd likely have meant also saved. For any other value that typing
-  a number could have saved, such as `2 hours` (also what typing `7200` saved), it asks you once, in a notification,
-  to check it. Whole days and multiples of 6 hours are left alone. It only notifies you if the add-on deletes
-  ignored backups.
+**Breaking:** a plain number in the web UI's "Delete ignored backups after" now means days, not seconds. On its
+  first start the add-on corrects a value that looks saved as seconds (`30` becomes 30 days), or asks you once, in
+  a notification, to check it.
 
 ## v0.3.0 [2026-11-02]
 
