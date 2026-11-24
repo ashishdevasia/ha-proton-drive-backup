@@ -35,10 +35,11 @@ rm -rf "${XDG_DATA_HOME}/proton-drive-cli/events.lock"
 # Generate a stable keyring password the first time the add-on runs.  It only
 # protects the Proton session at rest inside the already-private /data volume.
 if [ ! -f "${KEYRING_PASS_FILE}" ]; then
-    head -c 32 /dev/urandom | base64 > "${KEYRING_PASS_FILE}"
-    chmod 600 "${KEYRING_PASS_FILE}"
+    # Create the key 0600 from the start, with no window at the default umask.
+    ( umask 077; head -c 32 /dev/urandom | base64 > "${KEYRING_PASS_FILE}" )
 fi
-KEYRING_PASS="$(cat "${KEYRING_PASS_FILE}")"
+chmod 600 "${KEYRING_PASS_FILE}"
+export KEYRING_PASS_FILE
 
 start_keyring() {
     # Start (or replace) gnome-keyring-daemon and unlock it in a single call.
@@ -46,14 +47,13 @@ start_keyring() {
     # stdin and unlocks the "login" keyring (creating it on first run).  The
     # daemon prints GNOME_KEYRING_CONTROL and GNOME_KEYRING_PID which we eval
     # so that libsecret (used by proton-drive) can find the service.
-    eval "$(echo -n "${KEYRING_PASS}" | gnome-keyring-daemon --replace --unlock --components=secrets 2>/dev/null)" || true
+    # The password is read from the file here instead of living in the environment,
+    # so neither gnome-keyring nor the Python app inherits it.
+    eval "$(printf %s "$(cat "${KEYRING_PASS_FILE}")" | gnome-keyring-daemon --replace --unlock --components=secrets 2>/dev/null)" || true
     export GNOME_KEYRING_CONTROL GNOME_KEYRING_PID
 }
 
 # Run everything under a private D-Bus session so libsecret can find the service.
-# KEYRING_PASS is exported (not baked into the command line) so it doesn't show
-# up in the child's argv / `ps` output.
-export KEYRING_PASS
 # Prevent gnome-keyring from trying to open a GUI prompter (there is no display).
 export GCR_ALLOW_INTERACTION=false
 exec dbus-run-session -- bash -c '
