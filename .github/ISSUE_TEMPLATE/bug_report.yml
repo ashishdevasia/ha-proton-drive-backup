@@ -1,0 +1,53 @@
+name: Bug report
+description: Something in the add-on doesn't work as expected.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Security problems don't belong here: please [report them privately](https://github.com/ashishdevasia/ha-proton-drive-backup/security/advisories/new).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Add-on version
+      description: Shown in the web UI under **About**, and on the app's page under **Settings → Apps** (**Settings → Add-ons** on older Home Assistant versions).
+      placeholder: "0.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: >-
+        The machine Home Assistant runs on. On amd64, include the CPU model or the VM's CPU type:
+        some Proton Drive CLI versions needed CPU features that older CPUs and some VMs don't have.
+      placeholder: "Raspberry Pi 5 / Intel N100 mini PC / Proxmox VM, CPU type x86-64-v2-AES"
+
+  - type: textarea
+    id: report
+    attributes:
+      label: Bug report from the add-on
+      description: |
+        In the add-on's web UI, open **About**, click **Create a bug report**, then **Copy report** and paste it here. It includes versions, your non-default settings (passwords redacted) and recent logs.
+        If the web UI won't open, paste the end of the **Log** tab on the app's page in Home Assistant instead.
+        Read it before posting and remove anything you don't want public, such as email addresses or file names.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you submit
+      options:
+        - label: I searched the existing issues and this hasn't been reported yet.
+          required: true
+        - label: I removed anything private from the report and logs.
+          required: true

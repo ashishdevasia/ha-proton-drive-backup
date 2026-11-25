@@ -1,0 +1,6 @@
+# Test-only dependencies. The image doesn't install these. To run the tests,
+# install them on top of the add-on's own dependencies:
+#   pip install --require-hashes -r requirements-addon.lock
+#   pip install -r requirements-dev.txt
+pytest==9.2.0
+pytest-asyncio==1.5.0
