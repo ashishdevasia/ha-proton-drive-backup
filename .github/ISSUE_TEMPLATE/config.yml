@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Ask a question
+    url: https://github.com/ashishdevasia/ha-proton-drive-backup/discussions
+    about: Questions about setting up or using the add-on.
