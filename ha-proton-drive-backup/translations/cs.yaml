@@ -1,0 +1,160 @@
+# Názvy a popisy pro kartu Nastavení doplňku v Home Assistantu. Viz en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Kolik záloh ponechat v Home Assistantu
+    description: Kolik nejnovějších záloh ponechat na tomto stroji; nejstarší se smaže první. 0 z Home Assistantu nikdy nemaže (pokud nechcete žádné místní kopie, zapněte místo toho „Po nahrání smazat z Home Assistantu“).
+  max_backups_in_proton_drive:
+    name: Kolik záloh ponechat v Proton Drive
+    description: Kolik nejnovějších záloh ponechat v Proton Drive; nejstarší se smaže první. 0 z Proton Drive nikdy nemaže.
+  days_between_backups:
+    name: Počet dní mezi zálohami
+    description: Jak často se vytváří nová záloha, ve dnech (jde zadat i desetinné číslo). Když je nastavený čas zálohy, zaokrouhlí se nahoru na celé dny. 0 vypne naplánované zálohy.
+  ignore_other_backups:
+    name: Ignorovat zálohy vytvořené jinde
+    description: Nespravovat ani nemazat zálohy, které tento doplněk nevytvořil.
+  ignore_upgrade_backups:
+    name: Ignorovat zálohy z aktualizací
+    description: Nepočítat zálohy, které Home Assistant automaticky vytváří při aktualizacích.
+  backup_storage:
+    name: Umístění záloh
+    description: Název síťového úložiště v Home Assistantu, kam se mají zálohy vytvářet, nebo local-disk. Prázdné použije výchozí umístění záloh Home Assistantu.
+  delete_after_upload:
+    name: Po nahrání smazat z Home Assistantu
+    description: Po nahrání nechat zálohy jen v Proton Drive.
+  delete_before_new_backup:
+    name: Před novou zálohou smazat starou
+    description: 'Hodí se, když je na disku málo místa: nejdřív smaže nejstarší zálohu.'
+  use_ssl:
+    name: Použít SSL
+    description: Provozovat další webový server přes HTTPS, pomocí voleb „Soubor certifikátu“ a „Soubor klíče“.
+  certfile:
+    name: Soubor certifikátu
+    description: 'Certifikát pro „Použít SSL“. Výchozí: /ssl/fullchain.pem.'
+  keyfile:
+    name: Soubor klíče
+    description: 'Soukromý klíč pro „Použít SSL“. Výchozí: /ssl/privkey.pem.'
+  require_login:
+    name: Vyžadovat přihlášení do Home Assistantu
+    description: Na dalším webovém serveru chtít uživatelské jméno a heslo administrátora Home Assistantu. Nechte zapnuté, kdykoli je další server zapnutý.
+  backup_name:
+    name: Šablona názvu
+    description: Šablona pro názvy záloh, např. {type} Backup {year}-{month}-{day}. Nastavení ve webovém rozhraní uvádí všechny zástupné symboly.
+  backup_time_of_day:
+    name: Čas zálohy
+    description: Místní čas, kdy se vytvářejí naplánované zálohy, ve formátu HH:MM (24 hodin). Prázdné znamená kdykoli.
+  warn_for_low_space:
+    name: Upozornit, když dochází místo
+    description: Před vytvořením zálohy zkontrolovat volné místo na disku a zastavit s varováním, když je ho málo.
+  watch_backup_directory:
+    name: Sledovat složku záloh
+    description: Zaznamenat nové nebo odstraněné soubory záloh hned, ne až při další synchronizaci.
+  generational_days:
+    name: Kolik denních záloh ponechat
+    description: 'Generační zálohy: kolik denních záloh ponechat. Dokud je nastavená některá generační volba, 0 se bere jako 1, takže nejnovější záloha se vždy ponechá.'
+  generational_weeks:
+    name: Kolik týdenních záloh ponechat
+    description: 'Generační zálohy: kolik týdenních záloh ponechat.'
+  generational_months:
+    name: Kolik měsíčních záloh ponechat
+    description: 'Generační zálohy: kolik měsíčních záloh ponechat.'
+  generational_years:
+    name: Kolik ročních záloh ponechat
+    description: 'Generační zálohy: kolik ročních záloh ponechat.'
+  generational_day_of_year:
+    name: Den roční zálohy
+    description: Den v roce (1–365), jehož záloha se ponechá jako roční.
+  generational_day_of_month:
+    name: Den měsíční zálohy
+    description: Den v měsíci (1–31), jehož záloha se ponechá jako měsíční.
+  generational_day_of_week:
+    name: Den týdenní zálohy
+    description: Den v týdnu, jehož záloha se ponechá jako týdenní.
+  generational_delete_early:
+    name: Mazat nadbytečné zálohy dřív
+    description: Smazat nadbytečné zálohy dřív, než se dosáhne limitu počtu.
+  notify_for_stale_backups:
+    name: Upozornit na zastaralé zálohy
+    description: Poslat trvalé oznámení, když se zálohy přestanou vytvářet, a to i tehdy, když se pozastaví, protože doplněk není přihlášený do Protonu.
+  enable_backup_stale_sensor:
+    name: Senzor zastaralých záloh
+    description: Vytvořit binary_sensor.backups_stale, který se zapne, když jsou zálohy zastaralé.
+  enable_backup_state_sensor:
+    name: Senzor stavu záloh
+    description: Vytvořit sensor.backup_state, který hlásí stav vašich záloh.
+  backup_password:
+    name: Heslo k zálohám
+    description: 'Šifrovat zálohy tímto heslem. Prázdné znamená bez hesla. Uložte si ho na bezpečné místo: bez něj zálohu neobnovíte.'
+  exclude_folders:
+    name: Vynechat složky
+    description: Složky oddělené čárkou, které se do záloh nemají zahrnout, např. share,media. S tímto nastavením budou zálohy částečné.
+  exclude_addons:
+    name: Vynechat doplňky
+    description: Slugy doplňků oddělené čárkou, které se do záloh nemají zahrnout, např. core_mariadb. S tímto nastavením budou zálohy částečné.
+  exclude_ha_database:
+    name: Vynechat databázi Home Assistantu
+    description: Vynechat ze záloh home-assistant_v2.db, aby byly menší.
+  stop_addons:
+    name: Zastavit doplňky během zálohy
+    description: Slugy doplňků oddělené čárkou, které se před zálohou zastaví a potom znovu spustí (hodí se pro databáze).
+  expose_extra_server:
+    name: Zapnout další webový server
+    description: Zpřístupnit webové rozhraní i na vlastním portu, mimo ingress Home Assistantu. Zapněte k tomu i „Vyžadovat přihlášení do Home Assistantu“.
+  confirm_multiple_deletes:
+    name: Ptát se před smazáním více záloh
+    description: Než se najednou smaže víc než jedna stará záloha, zastavit se a zeptat ve webovém rozhraní.
+  enable_proton_upload:
+    name: Nahrávat zálohy do Proton Drive
+    description: Když je vypnuto, doplněk spravuje zálohy jen v Home Assistantu.
+  proton_folder_name:
+    name: Složka v Proton Drive
+    description: Složka v kořeni Proton Drive, kam se ukládají zálohy. Pro vnořené složky použijte /, např. backups/ha. Použijte složku, která slouží jen pro zálohy.
+  proton_cli_path:
+    name: Cesta k proton-drive CLI
+    description: Cesta k přibalenému Proton Drive CLI.
+  proton_data_path:
+    name: Cesta k datům Protonu
+    description: Kde CLI uchovává svou relaci, klíčenku a dočasné soubory přenosů.
+  proton_drive_timeout_seconds:
+    name: Časový limit CLI
+    description: Kolik sekund čekat na výpisy a operace s metadaty.
+  proton_transfer_timeout_seconds:
+    name: Časový limit přenosu
+    description: Kolik sekund čekat na jedno nahrání nebo stažení.
+  permanently_delete:
+    name: Smazané zálohy odstranit trvale
+    description: Odstranit smazané zálohy i z koše v Proton Drive, aby se přestaly počítat do vašeho úložiště. Vypněte, pokud je chcete mít možnost obnovit z koše.
+  delete_ignored_after_days:
+    name: Mazat ignorované zálohy po
+    description: Počet dní, po kterých se ignorované zálohy automaticky smažou. 0 je ponechá navždy.
+  call_backup_snapshot:
+    name: Říkat zálohám „snapshoty“
+    description: V oznámeních a senzorech používat starší výraz „snapshot“.
+  background_color:
+    name: Barva pozadí
+    description: 'Barva pozadí webového rozhraní, ve formátu #RRGGBB. Prázdné použije výchozí barvu.'
+  accent_color:
+    name: Barva zvýraznění
+    description: 'Barva zvýraznění webového rozhraní, ve formátu #RRGGBB. Prázdné použije výchozí barvu.'
+  max_sync_interval_seconds:
+    name: Max. interval synchronizace
+    description: Nejdelší doba, kterou doplněk čeká mezi synchronizacemi, v sekundách (nejméně 300).
+  default_sync_interval_variation:
+    name: Rozptyl intervalu synchronizace
+    description: Náhodný rozptyl pravidelné synchronizace jako podíl (0–1) max. intervalu synchronizace. Při 0.5 a 3 hodinách proběhne synchronizace jednou za 1,5 až 3 hodiny.
+  port:
+    name: Port dalšího webového serveru
+    description: 'Port, na kterém další webový server naslouchá uvnitř doplňku. Výchozí: 8471.'
+  log_level:
+    name: Úroveň logování (webové rozhraní)
+    description: Kolik podrobností se uchovává pro kartu Logy ve webovém rozhraní a pro hlášení chyb.
+  console_log_level:
+    name: Úroveň logování (konzole)
+    description: Kolik podrobností ukazuje karta Protokol doplňku v Home Assistantu.
+  max_backoff_seconds:
+    name: Max. prodleva mezi pokusy
+    description: Nejdelší čekání mezi pokusy po neúspěšné synchronizaci, v sekundách (nejméně 3600).
+  ha_reporting_interval_seconds:
+    name: Interval aktualizace senzorů
+    description: Jak často doplněk aktualizuje své senzory v Home Assistantu, v sekundách.
+network:
+  8471/tcp: Další webový server, mimo ingress (jen když je zapnutá volba „Zapnout další webový server“).

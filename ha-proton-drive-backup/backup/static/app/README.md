@@ -57,8 +57,8 @@ icon font, no npm). Just edit the files — there is nothing to compile.
 
 Every string the UI shows comes from `locales/<lang>.json` through `t(key,
 params)` (`i18n.js`). The UI ships English, German, Spanish, French, Italian,
-Dutch, Polish, Brazilian Portuguese and Malayalam. Most were written without a
-native speaker's review: corrections are welcome.
+Dutch, Polish, Brazilian Portuguese, Czech, Swedish, Ukrainian and Malayalam.
+Most were written without a native speaker's review: corrections are welcome.
 
 **Which language.** The first match wins:
 1. `?lang=xx`, for previews (`devserver.py`: `?mock=1&lang=ml`).

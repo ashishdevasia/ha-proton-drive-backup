@@ -1,0 +1,161 @@
+# Namn och beskrivningar för tilläggets flik Konfiguration i Home Assistant. Se
+# en.yaml.
+configuration:
+  max_backups_in_ha:
+    name: Backuper att behålla i Home Assistant
+    description: Antal senaste backuper att behålla på den här maskinen; den äldsta tas bort först. 0 tar aldrig bort något från Home Assistant (vill du inte ha några lokala kopior, slå på ”Ta bort från Home Assistant efter uppladdning” i stället).
+  max_backups_in_proton_drive:
+    name: Backuper att behålla i Proton Drive
+    description: Antal senaste backuper att behålla i Proton Drive; den äldsta tas bort först. 0 tar aldrig bort något från Proton Drive.
+  days_between_backups:
+    name: Dagar mellan backuper
+    description: Hur ofta en ny backup görs, i dagar (decimaler går bra). Med en tid på dygnet inställd avrundas det uppåt till hela dagar. 0 stänger av schemalagda backuper.
+  ignore_other_backups:
+    name: Ignorera backuper som gjorts någon annanstans
+    description: Varken hantera eller ta bort backuper som det här tillägget inte har gjort.
+  ignore_upgrade_backups:
+    name: Ignorera uppgraderingsbackuper
+    description: Räkna inte in de backuper som Home Assistant gör automatiskt vid uppgraderingar.
+  backup_storage:
+    name: Backupplats
+    description: Namnet på den nätverkslagring i Home Assistant där backuperna ska göras, eller local-disk. Tomt använder Home Assistants standardplats för backuper.
+  delete_after_upload:
+    name: Ta bort från Home Assistant efter uppladdning
+    description: Behåll backuperna bara i Proton Drive när de har laddats upp.
+  delete_before_new_backup:
+    name: Ta bort en gammal backup innan en ny görs
+    description: 'Bra när diskutrymmet är knappt: tar bort den äldsta backupen först.'
+  use_ssl:
+    name: Använd SSL
+    description: Kör den extra webbservern över HTTPS, med ”Certifikatfil” och ”Nyckelfil”.
+  certfile:
+    name: Certifikatfil
+    description: 'Certifikat för ”Använd SSL”. Standard: /ssl/fullchain.pem.'
+  keyfile:
+    name: Nyckelfil
+    description: 'Privat nyckel för ”Använd SSL”. Standard: /ssl/privkey.pem.'
+  require_login:
+    name: Kräv inloggning i Home Assistant
+    description: Fråga efter användarnamn och lösenord för en Home Assistant-administratör på den extra webbservern. Ha det här på så länge den extra servern är aktiverad.
+  backup_name:
+    name: Namnmall
+    description: Mall för backupnamn, t.ex. {type} Backup {year}-{month}-{day}. Inställningarna i webbgränssnittet listar alla platshållare.
+  backup_time_of_day:
+    name: Tid på dygnet
+    description: Lokal tid då schemalagda backuper görs, som HH:MM (24-timmarsformat). Tomt betyder när som helst.
+  warn_for_low_space:
+    name: Varna när det är ont om utrymme
+    description: Kontrollera ledigt diskutrymme innan en backup görs, och stoppa med en varning när det är lite kvar.
+  watch_backup_directory:
+    name: Bevaka backupmappen
+    description: Upptäck nya eller borttagna backupfiler direkt i stället för vid nästa synk.
+  generational_days:
+    name: Dagliga backuper att behålla
+    description: 'Generationsbackuper: hur många dagliga backuper som behålls. Så länge någon generationsinställning är satt räknas 0 som 1, så den senaste backupen behålls alltid.'
+  generational_weeks:
+    name: Veckobackuper att behålla
+    description: 'Generationsbackuper: hur många veckobackuper som behålls.'
+  generational_months:
+    name: Månadsbackuper att behålla
+    description: 'Generationsbackuper: hur många månadsbackuper som behålls.'
+  generational_years:
+    name: Årsbackuper att behålla
+    description: 'Generationsbackuper: hur många årsbackuper som behålls.'
+  generational_day_of_year:
+    name: Dag för årsbackup
+    description: Dag på året (1–365) vars backup behålls som årsbackup.
+  generational_day_of_month:
+    name: Dag för månadsbackup
+    description: Dag i månaden (1–31) vars backup behålls som månadsbackup.
+  generational_day_of_week:
+    name: Dag för veckobackup
+    description: Veckodag vars backup behålls som veckobackup.
+  generational_delete_early:
+    name: Ta bort extra backuper tidigt
+    description: Ta bort överflödiga backuper innan gränsen för antal nås.
+  notify_for_stale_backups:
+    name: Meddela när backuperna är inaktuella
+    description: Skicka en beständig avisering om backuperna slutar göras, även när de pausas för att tillägget är utloggat från Proton.
+  enable_backup_stale_sensor:
+    name: Sensor för inaktuella backuper
+    description: Skapa binary_sensor.backups_stale, som slås på när backuperna är inaktuella.
+  enable_backup_state_sensor:
+    name: Sensor för backupstatus
+    description: Skapa sensor.backup_state, som visar status för dina backuper.
+  backup_password:
+    name: Backuplösenord
+    description: 'Kryptera backuperna med det här lösenordet. Tomt betyder inget lösenord. Förvara det säkert: det behövs för att återställa.'
+  exclude_folders:
+    name: Undanta mappar
+    description: Kommaseparerade mappar som inte ska tas med i backuperna, t.ex. share,media. Med den här inställningen blir backuperna partiella.
+  exclude_addons:
+    name: Undanta tillägg
+    description: Kommaseparerade slugs för tillägg som inte ska tas med i backuperna, t.ex. core_mariadb. Med den här inställningen blir backuperna partiella.
+  exclude_ha_database:
+    name: Undanta Home Assistant-databasen
+    description: Lämna home-assistant_v2.db utanför backuperna så att de blir mindre.
+  stop_addons:
+    name: Stoppa tillägg under backup
+    description: Kommaseparerade slugs för tillägg som stoppas före en backup och startas igen efteråt (bra för databaser).
+  expose_extra_server:
+    name: Aktivera extra webbserver
+    description: Visa också webbgränssnittet på en egen port, utanför Home Assistants ingress. Slå på ”Kräv inloggning i Home Assistant” samtidigt.
+  confirm_multiple_deletes:
+    name: Fråga innan flera backuper tas bort
+    description: Pausa och fråga i webbgränssnittet innan mer än en gammal backup tas bort på en gång.
+  enable_proton_upload:
+    name: Ladda upp backuper till Proton Drive
+    description: När det är avstängt hanterar tillägget bara backuper i Home Assistant.
+  proton_folder_name:
+    name: Proton Drive-mapp
+    description: Mapp under roten i Proton Drive där backuperna sparas. Använd / för undermappar, t.ex. backups/ha. Använd en mapp som bara är till för backuperna.
+  proton_cli_path:
+    name: Sökväg till proton-drive CLI
+    description: Sökväg till den medföljande Proton Drive CLI.
+  proton_data_path:
+    name: Sökväg till Proton-data
+    description: Där CLI sparar sin session, nyckelring och tillfälliga överföringsfiler.
+  proton_drive_timeout_seconds:
+    name: CLI-timeout
+    description: Sekunder att vänta på listning och metadata.
+  proton_transfer_timeout_seconds:
+    name: Överföringstimeout
+    description: Sekunder att vänta på en enskild uppladdning eller nedladdning.
+  permanently_delete:
+    name: Radera borttagna backuper permanent
+    description: Ta också bort raderade backuper från papperskorgen i Proton Drive, så att de inte längre räknas mot ditt lagringsutrymme. Stäng av för att kunna återställa dem från papperskorgen.
+  delete_ignored_after_days:
+    name: Ta bort ignorerade backuper efter
+    description: Antal dagar innan ignorerade backuper tas bort automatiskt. 0 behåller dem för alltid.
+  call_backup_snapshot:
+    name: Kalla backuper ”snapshots”
+    description: Använd den äldre termen ”snapshot” i aviseringar och sensorer.
+  background_color:
+    name: Bakgrundsfärg
+    description: 'Webbgränssnittets bakgrundsfärg, som #RRGGBB. Tomt använder standardfärgen.'
+  accent_color:
+    name: Accentfärg
+    description: 'Webbgränssnittets accentfärg, som #RRGGBB. Tomt använder standardfärgen.'
+  max_sync_interval_seconds:
+    name: Max synkintervall
+    description: Längsta tid tillägget väntar mellan synkar, i sekunder (minst 300).
+  default_sync_interval_variation:
+    name: Variation i synkintervall
+    description: Slumpmässig spridning av den periodiska synken, som en andel (0–1) av max synkintervall. Med 0.5 och 3 timmar sker synkarna med 1,5 till 3 timmars mellanrum.
+  port:
+    name: Port för extra webbserver
+    description: 'Port som den extra webbservern lyssnar på inuti tillägget. Standard: 8471.'
+  log_level:
+    name: Loggnivå (webbgränssnitt)
+    description: Hur mycket detaljer som sparas för webbgränssnittets flik Loggar och buggrapporter.
+  console_log_level:
+    name: Loggnivå (konsol)
+    description: Hur detaljerad tilläggets flik Logg i Home Assistant är.
+  max_backoff_seconds:
+    name: Max fördröjning mellan försök
+    description: Längsta väntetid mellan nya försök efter en misslyckad synk, i sekunder (minst 3600).
+  ha_reporting_interval_seconds:
+    name: Intervall för sensoruppdatering
+    description: Hur ofta tillägget uppdaterar sina sensorer i Home Assistant, i sekunder.
+network:
+  8471/tcp: Extra webbserver, utanför ingress (bara när ”Aktivera extra webbserver” är på).

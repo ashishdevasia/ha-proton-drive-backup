@@ -57,7 +57,8 @@ bundles. As a result:
 ## Translations
 
 The Web UI and the Configuration tab are available in English, German, Spanish,
-French, Italian, Dutch, Polish, Brazilian Portuguese and Malayalam.
+French, Italian, Dutch, Polish, Brazilian Portuguese, Czech, Swedish, Ukrainian and
+Malayalam.
 
 **Help wanted:** most of these translations haven't been checked by a native
 speaker yet. If you speak one of these languages, please look through the app and

@@ -10,8 +10,8 @@
   // locales/<code>.json (same keys as en.json) and translations/<code>.yaml
   // (the add-on's Configuration tab); tests/test_translations.py checks both.
   var SUPPORTED = {
-    en: "English", de: "Deutsch", es: "Español", fr: "Français", it: "Italiano", ml: "മലയാളം", nl: "Nederlands",
-    pl: "Polski", "pt-BR": "Português (Brasil)"
+    en: "English", cs: "Čeština", de: "Deutsch", es: "Español", fr: "Français", it: "Italiano", ml: "മലയാളം",
+    nl: "Nederlands", pl: "Polski", "pt-BR": "Português (Brasil)", sv: "Svenska", uk: "Українська"
   };
   var FALLBACK = "en";
 
