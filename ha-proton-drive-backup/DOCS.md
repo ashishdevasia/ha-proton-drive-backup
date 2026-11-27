@@ -21,10 +21,10 @@ Once signed in, backups sync automatically.
 
 The Web UI and the option names in the Configuration tab follow your Home
 Assistant language when it's English, German, Spanish, French, Italian, Dutch,
-Polish, Brazilian Portuguese or Malayalam. For any other language the
-Configuration tab is in English, and the Web UI uses your browser's language
-if it's one of those, otherwise English. On the
-extra server (outside ingress) the Web UI follows your browser's language.
+Polish, Brazilian Portuguese, Czech, Swedish, Ukrainian or Malayalam. For any
+other language the Configuration tab is in English, and the Web UI uses your
+browser's language if it's one of those, otherwise English. On the extra
+server (outside ingress) the Web UI follows your browser's language.
 
 Some text stays in English: the add-on's log, messages from the Proton Drive
 CLI, the add-on's Home Assistant notifications and sensor names, and error
